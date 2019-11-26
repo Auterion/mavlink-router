@@ -514,7 +514,7 @@ bool Mainloop::add_endpoints(Mainloop &mainloop, struct options *opt)
                 while (token != nullptr) {
                     udp->add_message_to_filter(atoi(token));
                     token = strtok(nullptr, ",");
-                } 
+                }
             }
 
             g_endpoints[i] = udp.release();
@@ -758,44 +758,58 @@ void Mainloop::_handle_pipe()
     if (num_read > 0) {
         cmd[num_read] = 0;
         log_debug("Pipe read %ld bytes: %s", num_read, cmd);
-        // Op UDP Name IP Port Eavesdropping
-        std::vector<std::string> a;
-        std::string command = cmd;
-        char *pch = strtok(cmd, " ");
-        while (pch != nullptr) {
-            a.emplace_back(pch);
-            pch = strtok(nullptr, " \n");
+
+        // if more than one command separated by an end of
+        // line was written in the pipe, separate each command
+        std::vector<char*> command_vector;
+        char *pch = strtok(cmd, "\n");
+        while (pch != nullptr ) {
+            command_vector.push_back(pch);
+            pch = strtok(nullptr, "\n");
         }
 
-        if (a.size() == 2 && a[0] == "remove") {
-            _remove_dynamic_endpoint(a[1]);
-            return;
-        }
+        for (auto command : command_vector) {
+          // Parse each command
+          // Command Format:
+          // Cmd UDP Name IP Port Eavesdropping
+          // e.g. add udp application 127.0.0.1 14532 0
+          std::vector<std::string> a;
+          pch = strtok(command, " ");
+          while (pch != nullptr) {
+              a.emplace_back(pch);
+              pch = strtok(nullptr, " \n");
+          }
 
-        if (a.size() != 6 || a[0] != "add" || a[1] != "udp") {
-            return;
-        }
-        std::string name = a[2];
-        std::string address = a[3];
-        int port = atoi(a[4].c_str());
-        if (port <= 0) {
-            return;
-        }
+          if (a.size() == 2 && a[0] == "remove") {
+              _remove_dynamic_endpoint(a[1]);
+              continue;
+          }
 
-        auto pipecmd = _pipe_commands.find(name);
-        if (pipecmd != _pipe_commands.end() && pipecmd->second == command) {
-            auto ep = _dynamic_endpoints.find(name);
-            if (ep != _dynamic_endpoints.end()) {
-                ep->second->reset_expire_timer();
-                return;
-            }
-        }
+          if (a.size() != 6 || a[0] != "add" || a[1] != "udp") {
+              continue;
+          }
+          std::string name = a[2];
+          std::string address = a[3];
+          int port = atoi(a[4].c_str());
+          if (port <= 0) {
+              continue;
+          }
 
-        std::unique_ptr<UdpEndpoint> udp{new UdpEndpoint()};
-        if (udp->open(address.c_str(), port, a[5]=="1") < 0) {
-            log_error("Could not open %s:%d", address.c_str(), port);
-            return;
+          auto pipecmd = _pipe_commands.find(name);
+          if (pipecmd != _pipe_commands.end() && pipecmd->second == command) {
+              auto ep = _dynamic_endpoints.find(name);
+              if (ep != _dynamic_endpoints.end()) {
+                  ep->second->reset_expire_timer();
+                  continue;
+              }
+          }
+
+          std::unique_ptr<UdpEndpoint> udp{new UdpEndpoint()};
+          if (udp->open(address.c_str(), port, a[5]=="1") < 0) {
+              log_error("Could not open %s:%d", address.c_str(), port);
+              continue;
+          }
+          _add_dynamic_endpoint(name, command, udp.release());
         }
-        _add_dynamic_endpoint(name, command, udp.release());
     }
 }
