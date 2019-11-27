@@ -755,26 +755,27 @@ void Mainloop::_handle_pipe()
 {
     char cmd[1024];
     ssize_t num_read = read(_pipefd, cmd, sizeof(cmd) - 1);
+    char* buffer = cmd;
     if (num_read > 0) {
         cmd[num_read] = 0;
         log_debug("Pipe read %ld bytes: %s", num_read, cmd);
 
-        // if more than one command separated by an end of
+        // If more than one command separated by an end of
         // line was written in the pipe, separate each command
-        std::vector<char*> command_vector;
-        char *pch = strtok(cmd, "\n");
-        while (pch != nullptr ) {
-            command_vector.push_back(pch);
-            pch = strtok(nullptr, "\n");
-        }
+        char* current_new_line = strchr(buffer, '\n');
+        while (current_new_line != NULL) {
+          char command[1024] = {0};
+          strncpy(command, buffer, current_new_line - buffer);
 
-        for (auto command : command_vector) {
+          buffer = current_new_line+1;
+          current_new_line = strchr(buffer, '\n');
+
           // Parse each command
           // Command Format:
           // Cmd UDP Name IP Port Eavesdropping
           // e.g. add udp application 127.0.0.1 14532 0
           std::vector<std::string> a;
-          pch = strtok(command, " ");
+          char *pch = strtok(command, " ");
           while (pch != nullptr) {
               a.emplace_back(pch);
               pch = strtok(nullptr, " \n");
