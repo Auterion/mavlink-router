@@ -764,9 +764,8 @@ void Mainloop::_handle_pipe()
         // line was written in the pipe, separate each command
         char* current_new_line = strchr(buffer, '\n');
         while (current_new_line != NULL) {
-          char command[1024] = {0};
-          strncpy(command, buffer, current_new_line - buffer);
-
+          *current_new_line = '\0';
+          char *command = buffer;
           buffer = current_new_line+1;
           current_new_line = strchr(buffer, '\n');
 
