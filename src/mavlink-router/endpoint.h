@@ -175,7 +175,7 @@ private:
 class UdpEndpoint : public Endpoint {
 public:
     UdpEndpoint();
-    virtual ~UdpEndpoint() {}
+    ~UdpEndpoint() override;
 
     int write_msg(const struct buffer *pbuf) override;
     int flush_pending_msgs() override { return -ENOSYS; }
