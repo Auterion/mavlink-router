@@ -76,9 +76,12 @@ int Endpoint::handle_read()
     uint32_t msg_id;
     struct buffer buf{};
 
-    while ((r = read_msg(&buf, &target_sysid, &target_compid, &src_sysid, &src_compid, &msg_id)) > 0)
-        Mainloop::get_instance().route_msg(&buf, target_sysid, target_compid, src_sysid,
-                                           src_compid, msg_id);
+    while ((r = read_msg(&buf, &target_sysid, &target_compid, &src_sysid,
+                         &src_compid, &msg_id)) > 0) {
+        if (allowed_by_filter(msg_id))
+            Mainloop::get_instance().route_msg(&buf, target_sysid, target_compid,
+                                               src_sysid, src_compid, msg_id);
+    }
 
     return r;
 }
@@ -326,13 +329,8 @@ bool Endpoint::accept_msg(int target_sysid, int target_compid, uint8_t src_sysid
     if (has_sys_comp_id(src_sysid, src_compid))
         return false;
 
-    if (msg_id != UINT32_MAX &&
-        _message_filter.size() > 0 &&
-        std::find(_message_filter.begin(), _message_filter.end(), msg_id) == _message_filter.end()) {
-
-        // if filter is defined and message is not in the set then discard it
+    if (!allowed_by_filter(msg_id))
         return false;
-    }
 
     // Message is broadcast on sysid: accept msg
     if (target_sysid == 0 || target_sysid == -1)
@@ -348,6 +346,18 @@ bool Endpoint::accept_msg(int target_sysid, int target_compid, uint8_t src_sysid
 
     // Reject everything else
     return false;
+}
+
+bool Endpoint::allowed_by_filter(uint32_t msg_id)
+{
+     if (msg_id != UINT32_MAX &&
+        _message_filter.size() > 0 &&
+        std::find(_message_filter.begin(), _message_filter.end(), msg_id) == _message_filter.end()) {
+
+        // if filter is defined and message is not in the set then discard it
+        return false;
+    }
+    return true;
 }
 
 void Endpoint::postprocess_msg(int target_sysid, int target_compid, uint8_t src_sysid,
