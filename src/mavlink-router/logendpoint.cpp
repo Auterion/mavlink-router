@@ -22,7 +22,6 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -32,6 +31,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -60,11 +60,13 @@ LogEndpoint::LogEndpoint(const char *name, const char *logs_dir, LogMode mode,
 
     _fsync_cb.aio_fildes = -1;
 
+#if HAVE_DECL_AIO_INIT
     aioinit aio_init_data {};
     aio_init_data.aio_threads = 1;
     aio_init_data.aio_num = 1;
     aio_init_data.aio_idle_time = 3; // make sure to keep the thread running
     aio_init(&aio_init_data);
+#endif
 }
 
 bool LogEndpoint::_broadcast_log_heartbeat() {
@@ -486,7 +488,7 @@ void LogEndpoint::_handle_auto_start_stop(uint32_t msg_id, uint8_t source_system
             && source_component_id == MAV_COMP_ID_AUTOPILOT1) {
 
             const mavlink_heartbeat_t *heartbeat = (mavlink_heartbeat_t *)payload;
-            const bool is_armed = heartbeat->system_status == MAV_STATE_ACTIVE;
+            const bool is_armed = heartbeat->base_mode & MAV_MODE_FLAG_SAFETY_ARMED;
 
             if (_file == -1 && is_armed && !_logging_stop_timeout) {
                 if (!start()) _mode = LogMode::disabled;
