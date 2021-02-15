@@ -22,6 +22,7 @@
 #include <chrono>
 #include <memory>
 #include <vector>
+#include <string>
 
 #include "comm.h"
 #include "pollable.h"
