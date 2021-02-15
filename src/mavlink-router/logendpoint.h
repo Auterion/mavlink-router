@@ -89,6 +89,8 @@ protected:
     void _handle_auto_start_stop(uint32_t msg_id, uint8_t source_system_id,
             uint8_t source_component_id, uint8_t *payload);
 
+    virtual void _close_file();
+
 private:
     int _get_file(const char *extension);
     uint32_t _get_prefix(DIR *dir);

@@ -345,6 +345,20 @@ void LogEndpoint::stop()
         _fsync_timeout = nullptr;
     }
 
+    _logging_stop_timeout = Mainloop::get_instance().add_timeout(
+        MSEC_PER_SEC / 10, std::bind(&LogEndpoint::_stop_timeout, this), this);
+    if (_logging_stop_timeout) {
+        if (!_stop_timeout()) {
+            _close_file();
+        }
+    } else {
+        log_error("Unable to add timeout for stopping log streaming");
+        _close_file();
+    }
+}
+
+void LogEndpoint::_close_file()
+{
     fsync(_file);
     close(_file);
     _file = -1;
@@ -355,14 +369,6 @@ void LogEndpoint::stop()
     if (snprintf(log_file, sizeof(log_file), "%s/%s", _logs_dir, _filename) < (int)sizeof(log_file)) {
         chmod(log_file, S_IRUSR|S_IRGRP|S_IROTH);
     }
-
-    _logging_stop_timeout = Mainloop::get_instance().add_timeout(
-        MSEC_PER_SEC, std::bind(&LogEndpoint::_stop_timeout, this), this);
-    if (!_logging_stop_timeout) {
-        log_error("Unable to add timeout for stopping log streaming");
-    }
-
-    _stop_timeout();
     // notify the system that we are standing by
     _system_status = MAV_STATE_STANDBY;
 }

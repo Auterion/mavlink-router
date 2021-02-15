@@ -85,7 +85,7 @@ bool ULog::start()
     return true;
 }
 
-void ULog::stop()
+void ULog::_close_file()
 {
     if (_file == -1) {
         log_info("ULog not started");
@@ -98,8 +98,7 @@ void ULog::stop()
         if (!_logging_flush())
             break;
     }
-
-    LogEndpoint::stop();
+    LogEndpoint::_close_file();
 }
 
 int ULog::write_msg(const struct buffer *buffer)
@@ -184,9 +183,10 @@ int ULog::write_msg(const struct buffer *buffer)
                 }
             } else if (_logging_stop_timeout && cmd.command == MAV_CMD_LOGGING_STOP) {
                 _remove_stop_timeout();
+                _close_file();
             }
 
-        } else
+        } else if (cmd.result != MAV_RESULT_IN_PROGRESS)
             log_error("MAV_CMD_LOGGING_%s result(%u) is different than accepted",cmd.command==MAV_CMD_LOGGING_START ? "START" : "STOP", cmd.result);
         break;
     }
