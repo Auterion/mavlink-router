@@ -317,11 +317,15 @@ int Mainloop::run_single(int timeout_msec)
     }
     for (int i = 0; i < r; i++) {
         if (events[i].data.ptr == &_pipefd) {
-            _handle_pipe();
+            if (!(events[i].events & EPOLLERR)) {
+                _handle_pipe();
+            }
             continue;
         }
         else if (events[i].data.ptr == &g_tcp_fd) {
-            handle_tcp_connection();
+            if (!(events[i].events & EPOLLERR)) {
+                handle_tcp_connection();
+            }
             continue;
         }
         Pollable *p = static_cast<Pollable *>(events[i].data.ptr);
