@@ -58,7 +58,7 @@ Mainloop::Mainloop()
         throw std::runtime_error(std::string("mkfifo: ") + strerror(errno));
     }
 
-    _pipefd = ::open(pipe_path, O_RDWR | O_CLOEXEC);
+    _pipefd = ::open(pipe_path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (_pipefd == -1) {
         throw std::runtime_error(std::string("open pipe: ") + strerror(errno));
     }
