@@ -53,6 +53,20 @@ Mainloop::Mainloop()
         throw std::runtime_error(std::string("epoll_create: ") + strerror(errno));
     }
 
+   _init_pipe();
+
+    instance = this;
+}
+
+Mainloop::~Mainloop()
+{
+    free_endpoints();
+    _del_timeouts(); // needs to happen after endpoints are freed
+    instance = nullptr;
+}
+
+void Mainloop::_init_pipe()
+{
     // XXX: this is bad for testing/multi-instantiation.
     if (mkfifo(pipe_path, 0777) == -1 && errno != EEXIST) {
         throw std::runtime_error(std::string("mkfifo: ") + strerror(errno));
@@ -63,15 +77,6 @@ Mainloop::Mainloop()
         throw std::runtime_error(std::string("open pipe: ") + strerror(errno));
     }
     add_fd(_pipefd, &_pipefd, EPOLLIN);
-
-    instance = this;
-}
-
-Mainloop::~Mainloop()
-{
-    free_endpoints();
-    _del_timeouts(); // needs to happen after endpoints are freed
-    instance = nullptr;
 }
 
 Mainloop& Mainloop::get_instance()
@@ -317,13 +322,22 @@ int Mainloop::run_single(int timeout_msec)
     }
     for (int i = 0; i < r; i++) {
         if (events[i].data.ptr == &_pipefd) {
-            if (!(events[i].events & EPOLLERR)) {
+            if (events[i].events & (EPOLLERR|EPOLLHUP)) {
+                remove_fd(_pipefd);
+                ::close(_pipefd);
+                _init_pipe();
+            }
+            else {
                 _handle_pipe();
             }
             continue;
         }
         else if (events[i].data.ptr == &g_tcp_fd) {
-            if (!(events[i].events & EPOLLERR)) {
+            if (events[i].events & EPOLLERR) {
+                remove_fd(g_tcp_fd);
+                request_exit();
+            }
+            else {
                 handle_tcp_connection();
             }
             continue;

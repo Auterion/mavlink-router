@@ -148,6 +148,7 @@ private:
     void _add_tcp_retry(TcpEndpoint *tcp);
     bool _retry_timeout_cb(void *data);
     bool _log_aggregate_timeout(void *data);
+    void _init_pipe();
     void _handle_pipe();
 
     static Mainloop* instance;
