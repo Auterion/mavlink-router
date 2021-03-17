@@ -412,6 +412,12 @@ static bool _print_statistics_timeout_cb(void *data)
     return true;
 }
 
+bool Mainloop::add_check_dedup(const buffer* buf)
+{
+    return _dedup.add_check_packet(buf->data, buf->len) == Dedup::PacketStatus::NEW_PACKET_OR_TIMED_OUT;
+}
+
+
 bool Mainloop::remove_dynamic_endpoint(Endpoint *endpoint)
 {
     if (!endpoint) {

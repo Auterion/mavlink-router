@@ -139,6 +139,7 @@ mavlink_routerd_SOURCES = \
 	src/common/conf_file.cpp \
 	src/common/conf_file.h \
 	src/common/dbg.h \
+	src/mavlink-router/dedup.cpp \
 	src/common/mavlink.h \
 	src/mavlink-router/endpoint.cpp \
 	src/mavlink-router/endpoint.h \
@@ -213,6 +214,8 @@ mainloop_test_SOURCES = \
 	src/mavlink-router/binlog.cpp \
 	src/mavlink-router/binlog.h \
 	src/mavlink-router/comm.h \
+	src/mavlink-router/dedup.h \
+	src/mavlink-router/dedup.cpp \
 	src/mavlink-router/endpoint.h \
 	src/mavlink-router/endpoint.cpp \
 	src/mavlink-router/endpoint.h \

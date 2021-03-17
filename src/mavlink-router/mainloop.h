@@ -25,6 +25,7 @@
 
 #include "binlog.h"
 #include "comm.h"
+#include "dedup.h"
 #include "endpoint.h"
 #include "timeout.h"
 #include "ulog.h"
@@ -86,6 +87,8 @@ public:
     bool remove_dynamic_endpoint(const dynamic_command& command);
     bool remove_dynamic_endpoint(Endpoint *endpoint);
 
+    bool add_check_dedup(const buffer* buf);
+
     void print_statistics();
 
     int epollfd = -1;
@@ -134,6 +137,8 @@ private:
     struct options* _options{nullptr};
 
     Timeout *_timeouts = nullptr;
+
+    Dedup _dedup;
 
     std::atomic<bool> _should_exit {false};
 
