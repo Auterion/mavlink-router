@@ -298,6 +298,10 @@ void Endpoint::_add_sys_comp_id(uint16_t sys_comp_id)
 
 bool Endpoint::has_sys_id(unsigned sysid)
 {
+    //-- If we don't have a sysID for this endpoint, we can't exclude it.
+    if(!_sys_comp_ids.size()) {
+        return true;
+    }
     for (auto it = _sys_comp_ids.begin(); it != _sys_comp_ids.end(); it++) {
         if (((*it >> 8) | (sysid & 0xff)) == sysid)
             return true;
