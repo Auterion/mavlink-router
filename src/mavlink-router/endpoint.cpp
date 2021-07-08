@@ -745,6 +745,10 @@ int UartEndpoint::read_msg(struct buffer *pbuf, int *target_sysid, int *target_c
 
 ssize_t UartEndpoint::_read_msg(uint8_t *buf, size_t len)
 {
+    // On some hardware-serial interfaces, it is necessary to kick the device
+    // before reading from it, otherwise we don't get any data
+    struct buffer dummy{0};
+    ssize_t p = ::write(fd, &dummy, 1);
     ssize_t r = ::read(fd, buf, len);
     if ((r == -1 && errno == EAGAIN) || r == 0)
         return 0;
