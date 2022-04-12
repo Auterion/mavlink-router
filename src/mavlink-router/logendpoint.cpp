@@ -404,9 +404,9 @@ bool LogEndpoint::start()
         goto timeout_error;
     }
 
-    // Call fsync once per second
+    // Call fsync twice per second
     _fsync_timeout = Mainloop::get_instance().add_timeout(
-        MSEC_PER_SEC, std::bind(&LogEndpoint::_fsync, this), this);
+        MSEC_PER_SEC/2, std::bind(&LogEndpoint::_fsync, this), this);
     if (!_fsync_timeout) {
         log_error("Unable to add timeout");
         goto timeout_error;
