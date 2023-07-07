@@ -1,0 +1,25 @@
+name: Build .deb
+on:
+  push:
+    branches:
+    - 'main'
+  pull_request:
+    branches:
+    - '*'
+  release:
+    types: [published]
+
+jobs:
+  build-deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    uses: Auterion/common-workflows/.github/workflows/deb-workflow.yml@main
+    with:
+      project-name: "mavlink-router"
+      architecture: ${{ matrix.arch }}
+      versioned-release: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+      include-release-body: false
+    secrets: inherit
+

@@ -3,6 +3,11 @@
 # output every command that modifies files on the build system.
 #export DH_VERBOSE = 1
 
+%:
+	# don't use build stamp so we can incrementally recompile and rebuild
+	# package on source changes
+	dh $@ --without=build-stamp
+
 # create a stamp file for having called "configure" -- this avoids lengthy
 # re-run of configure during incremental builds
 override_dh_auto_configure:
@@ -15,7 +20,3 @@ override_dh_auto_clean:
 	dh_auto_clean
 	rm -f debian/debhelper-auto-configure-stamp
 
-%:
-	# don't use build stamp so we can incrementally recompile and rebuild
-	# package on source changes
-	dh $@ --without=build-stamp
