@@ -1,0 +1,19 @@
+[Unit]
+Description=MAVLink Router
+
+[Service]
+EnvironmentFile=/usr/config/board_defaults.env
+EnvironmentFile=/usr/config/board.env
+EnvironmentFile=/usr/config/auterion.env
+EnvironmentFile=-/data/override.env
+Type=simple
+ExecStartPre=/usr/src/app/led_control.sh blue on
+ExecStart=/usr/bin/mavlink-routerd
+ExecStopPost=/usr/src/app/led_control.sh blue off
+Restart=on-failure
+Nice=-20
+RestartSec=5s
+TimeoutStopSec=5s
+
+[Install]
+WantedBy=multi-user.target
