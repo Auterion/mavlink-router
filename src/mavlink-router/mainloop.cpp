@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+#include <systemd/sd-daemon.h>
 
 #include <memory>
 #include <vector>
@@ -282,6 +283,8 @@ int Mainloop::loop()
 {
     if (epollfd < 0)
         return EXIT_FAILURE;
+
+    sd_notify(0, "WATCHDOG=1");
 
     MainloopSignalHandlers handlers(this);
 
