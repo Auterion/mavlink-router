@@ -305,6 +305,7 @@ int Mainloop::loop()
 
         while (now < deadline) {
             run_single((deadline - now) / 1000);
+            sd_notify(0, "WATCHDOG=1");
             now = now_usec();
         }
 
