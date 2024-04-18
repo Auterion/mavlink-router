@@ -15,7 +15,7 @@ jobs:
       - name: Install Dependencies
         run: |
           apt update
-          apt install autoconf autogen libtool systemd -y
+          apt install autoconf autogen libtool systemd libsystemd-dev -y
       - name: Build
         run: |
           ./autogen.sh && ./configure CFLAGS='-g -O2' --sysconfdir=/etc --localstatedir=/var --libdir=/usr/lib64 --prefix=/usr
