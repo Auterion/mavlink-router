@@ -284,8 +284,6 @@ int Mainloop::loop()
     if (epollfd < 0)
         return EXIT_FAILURE;
 
-    sd_notify(0, "WATCHDOG=1");
-
     MainloopSignalHandlers handlers(this);
 
     add_timeout(LOG_AGGREGATE_INTERVAL_SEC * MSEC_PER_SEC,
@@ -293,6 +291,7 @@ int Mainloop::loop()
 
     while (!_should_exit.load(std::memory_order_relaxed)) {
         run_single(-1);
+        sd_notify(0, "WATCHDOG=1");
     }
 
     // This is a bit weird, but models previous behavior: run event handling a
