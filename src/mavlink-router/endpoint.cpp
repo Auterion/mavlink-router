@@ -47,6 +47,9 @@
 
 #define UART_BAUD_RETRY_SEC 5
 
+static std::mutex _group_sys_comp_ids_mutex;
+static std::map<uint32_t, std::vector<uint16_t>> _group_sys_comp_ids;
+
 Endpoint::Endpoint(const std::string& name)
     : _name{name}, _message_log(Mainloop::get_instance())
 {

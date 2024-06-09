@@ -171,8 +171,8 @@ protected:
 
     uint32_t _incomplete_msgs = 0;
     std::vector<uint16_t> _sys_comp_ids;
-    inline static std::mutex _group_sys_comp_ids_mutex;
-    inline static std::map<uint32_t, std::vector<uint16_t>> _group_sys_comp_ids;
+    static std::mutex _group_sys_comp_ids_mutex;
+    static std::map<uint32_t, std::vector<uint16_t>> _group_sys_comp_ids;
 
 private:
     Timeout* _expire_timer = nullptr;
