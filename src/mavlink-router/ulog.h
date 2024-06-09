@@ -23,29 +23,26 @@
 
 class ULog : public LogEndpoint {
 public:
-    ULog(const char *logs_dir, LogMode mode, unsigned long min_free_space, unsigned long max_files, bool heartbeat)
-        : LogEndpoint{"ULog", logs_dir, mode, min_free_space, max_files, heartbeat}
+    ULog(LogOptions conf)
+        : LogEndpoint{"ULog", conf}
     {
     }
 
     bool start() override;
+    void stop() override;
 
-    int write_msg(const struct buffer *pbuf) override;
+    int write_msg(const struct buffer *buffer) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
 protected:
     ssize_t _read_msg(uint8_t *buf, size_t len) override { return 0; };
-    bool _start_timeout() override;
-    bool _stop_timeout() override;
-
-    void _close_file() override;
+    bool _logging_start_timeout() override;
 
     const char *_get_logfile_extension() override { return "ulg"; };
+
 private:
     uint16_t _expected_seq = 0;
     bool _waiting_header = true;
-    bool _waiting_flags = true;
-    bool _meta_written = false;
     bool _waiting_first_msg_offset = false;
 
     uint8_t _buffer[BUFFER_LEN];

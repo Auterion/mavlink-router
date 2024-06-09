@@ -154,9 +154,11 @@ mavlink_routerd_SOURCES = \
 	src/mavlink-router/pollable.cpp \
 	src/mavlink-router/timeout.h \
 	src/mavlink-router/timeout.cpp \
+	src/mavlink-router/dedup.cpp \
 	src/mavlink-router/ulog.h \
 	src/mavlink-router/ulog.cpp \
-	src/common/util.c \
+	src/mavlink-router/tlog.cpp \
+	src/common/util.cpp \
 	src/common/util.h \
 	src/common/xtermios.cpp \
 	src/common/xtermios.h
@@ -168,7 +170,7 @@ heartbeat_print_SOURCES = \
 noinst_PROGRAMS += px4-offboard-mode
 px4_offboard_mode_SOURCES = \
 	examples/px4-offboard-mode.cpp \
-	src/common/util.c
+	src/common/util.cpp
 
 noinst_PROGRAMS += arm-authorizer
 arm_authorizer_SOURCES = \
@@ -204,7 +206,8 @@ endif
 mainloop_test_SOURCES = \
 	src/common/log.cpp \
 	src/common/log.h \
-	src/common/util.c \
+	src/common/util.cpp \
+	src/mavlink-router/dedup.cpp \
 	src/common/util.h \
 	src/common/xtermios.cpp \
 	src/common/xtermios.h \

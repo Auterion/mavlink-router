@@ -25,7 +25,6 @@
 
 #include <common/log.h>
 #include <common/util.h>
-#include "auterion_ulog_meta_writer.h"
 
 #define ULOG_HEADER_SIZE 16
 #define ULOG_MAGIC                               \
@@ -40,27 +39,13 @@ struct _packed_ ulog_msg_header {
     uint8_t msg_type;
 };
 
-bool ULog::_start_timeout()
+bool ULog::_logging_start_timeout()
 {
     mavlink_message_t msg;
-    mavlink_command_long_t cmd{};
+    mavlink_command_long_t cmd;
 
+    bzero(&cmd, sizeof(cmd));
     cmd.command = MAV_CMD_LOGGING_START;
-    cmd.target_component = MAV_COMP_ID_ALL;
-    cmd.target_system = _target_system_id;
-
-    mavlink_msg_command_long_encode(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg, &cmd);
-    _send_msg(&msg, _target_system_id);
-
-    return true;
-}
-
-bool ULog::_stop_timeout()
-{
-    mavlink_message_t msg;
-    mavlink_command_long_t cmd{};
-
-    cmd.command = MAV_CMD_LOGGING_STOP;
     cmd.target_component = MAV_COMP_ID_ALL;
     cmd.target_system = _target_system_id;
 
@@ -75,6 +60,7 @@ bool ULog::start()
     if (!LogEndpoint::start()) {
         return false;
     }
+
     _waiting_header = true;
     _waiting_first_msg_offset = false;
     _expected_seq = 0;
@@ -85,71 +71,62 @@ bool ULog::start()
     return true;
 }
 
-void ULog::_close_file()
+void ULog::stop()
 {
+    mavlink_message_t msg;
+    mavlink_command_long_t cmd;
+
     if (_file == -1) {
         log_info("ULog not started");
         return;
     }
 
+    bzero(&cmd, sizeof(cmd));
+    cmd.command = MAV_CMD_LOGGING_STOP;
+    cmd.target_component = MAV_COMP_ID_ALL;
+    cmd.target_system = _target_system_id;
+
+    mavlink_msg_command_long_encode(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg, &cmd);
+    _send_msg(&msg, _target_system_id);
+
     _buffer_len = 0;
     /* Write the last partial message to avoid corrupt the end of the file */
     while (_buffer_partial_len) {
-        if (!_logging_flush())
+        if (!_logging_flush()) {
             break;
+        }
     }
-    LogEndpoint::_close_file();
+
+    LogEndpoint::stop();
 }
 
 int ULog::write_msg(const struct buffer *buffer)
 {
     const bool mavlink2 = buffer->data[0] == MAVLINK_STX;
-    uint32_t msg_id;
-    uint8_t *payload;
-    uint16_t payload_len;
     uint8_t trimmed_zeros;
-    uint8_t source_system_id;
-    uint8_t source_component_id;
-
-
-    if (mavlink2) {
-        struct mavlink_router_mavlink2_header *msg
-            = (struct mavlink_router_mavlink2_header *)buffer->data;
-        msg_id = msg->msgid;
-        payload = buffer->data + sizeof(struct mavlink_router_mavlink2_header);
-        payload_len = msg->payload_len;
-        source_system_id = msg->sysid;
-        source_component_id = msg->compid;
-    } else {
-        struct mavlink_router_mavlink1_header *msg
-            = (struct mavlink_router_mavlink1_header *)buffer->data;
-        msg_id = msg->msgid;
-        payload = buffer->data + sizeof(struct mavlink_router_mavlink1_header);
-        payload_len = msg->payload_len;
-        source_system_id = msg->sysid;
-        source_component_id = msg->compid;
-    }
 
     /* set the expected system id to the first autopilot that we get a heartbeat from */
-    if (_target_system_id == -1 && msg_id == MAVLINK_MSG_ID_HEARTBEAT
-        && source_component_id == MAV_COMP_ID_AUTOPILOT1) {
-        _target_system_id = source_system_id;
+    if (_target_system_id == -1 && buffer->curr.msg_id == MAVLINK_MSG_ID_HEARTBEAT
+        && buffer->curr.src_compid == MAV_COMP_ID_AUTOPILOT1) {
+        _target_system_id = buffer->curr.src_sysid;
     }
 
     /* Check if we should start or stop logging */
-    _handle_auto_start_stop(msg_id, source_system_id, source_component_id, payload);
+    _handle_auto_start_stop(buffer);
 
     /* Check if we are interested in this msg_id */
-    if (msg_id != MAVLINK_MSG_ID_COMMAND_ACK && msg_id != MAVLINK_MSG_ID_LOGGING_DATA_ACKED
-        && msg_id != MAVLINK_MSG_ID_LOGGING_DATA) {
+    if (buffer->curr.msg_id != MAVLINK_MSG_ID_COMMAND_ACK
+        && buffer->curr.msg_id != MAVLINK_MSG_ID_LOGGING_DATA_ACKED
+        && buffer->curr.msg_id != MAVLINK_MSG_ID_LOGGING_DATA) {
         return buffer->len;
     }
 
-    const mavlink_msg_entry_t *msg_entry = mavlink_get_msg_entry(msg_id);
+    const mavlink_msg_entry_t *msg_entry = mavlink_get_msg_entry(buffer->curr.msg_id);
     if (!msg_entry) {
         return buffer->len;
     }
 
+    uint16_t payload_len = buffer->curr.payload_len;
     if (payload_len > msg_entry->max_msg_len) {
         payload_len = msg_entry->max_msg_len;
     }
@@ -161,37 +138,32 @@ int ULog::write_msg(const struct buffer *buffer)
     }
 
     /* Handle messages */
-    switch (msg_id) {
+    switch (buffer->curr.msg_id) {
     case MAVLINK_MSG_ID_COMMAND_ACK: {
         mavlink_command_ack_t cmd;
 
-        memcpy(&cmd, payload, payload_len);
-        if (trimmed_zeros)
+        memcpy(&cmd, buffer->curr.payload, payload_len);
+        if (trimmed_zeros) {
             memset(((uint8_t *)&cmd) + payload_len, 0, trimmed_zeros);
+        }
 
-        if ((!_logging_start_timeout || cmd.command != MAV_CMD_LOGGING_START) &&
-                (!_logging_stop_timeout || cmd.command != MAV_CMD_LOGGING_STOP))
+        if (!_timeout.logging_start || cmd.command != MAV_CMD_LOGGING_START) {
             return buffer->len;
+        }
 
         if (cmd.result == MAV_RESULT_ACCEPTED) {
-            if (_logging_start_timeout && cmd.command == MAV_CMD_LOGGING_START) {
-                _remove_start_timeout();
-
-                if (!_start_alive_timeout()) {
+            _remove_logging_start_timeout();
+            if (!_start_alive_timeout()) {
                 log_warning("Could not start liveness timeout - mavlink router log won't be able "
                             "to detect if flight stack stopped");
-                }
-            } else if (_logging_stop_timeout && cmd.command == MAV_CMD_LOGGING_STOP) {
-                _remove_stop_timeout();
-                _close_file();
             }
-
-        } else if (cmd.result != MAV_RESULT_IN_PROGRESS)
-            log_error("MAV_CMD_LOGGING_%s result(%u) is different than accepted",cmd.command==MAV_CMD_LOGGING_START ? "START" : "STOP", cmd.result);
+        } else {
+            log_error("MAV_CMD_LOGGING_START result(%u) is different than accepted", cmd.result);
+        }
         break;
     }
     case MAVLINK_MSG_ID_LOGGING_DATA_ACKED: {
-        mavlink_logging_data_acked_t *ulog_data_acked = (mavlink_logging_data_acked_t *)payload;
+        auto *ulog_data_acked = (mavlink_logging_data_acked_t *)buffer->curr.payload;
         mavlink_message_t msg;
         mavlink_logging_ack_t ack;
 
@@ -202,15 +174,15 @@ int ULog::write_msg(const struct buffer *buffer)
         _send_msg(&msg, _target_system_id);
         /* message will be handled by MAVLINK_MSG_ID_LOGGING_DATA case */
     }
-    /* fall through */
+        /* fall through */
     case MAVLINK_MSG_ID_LOGGING_DATA: {
         if (trimmed_zeros) {
             mavlink_logging_data_t ulog_data;
-            memcpy(&ulog_data, payload, payload_len);
+            memcpy(&ulog_data, buffer->curr.payload, payload_len);
             memset(((uint8_t *)&ulog_data) + payload_len, 0, trimmed_zeros);
             _logging_data_process(&ulog_data);
         } else {
-            mavlink_logging_data_t *ulog_data = (mavlink_logging_data_t *)payload;
+            auto *ulog_data = (mavlink_logging_data_t *)buffer->curr.payload;
             _logging_data_process(ulog_data);
         }
         break;
@@ -257,8 +229,9 @@ void ULog::_logging_data_process(mavlink_logging_data_t *msg)
 {
     bool drops = false;
 
-    if (!_logging_seq(msg->sequence, &drops))
+    if (!_logging_seq(msg->sequence, &drops)) {
         return;
+    }
 
     /* Waiting for ULog header? */
     if (_waiting_header) {
@@ -327,8 +300,9 @@ void ULog::_logging_data_process(mavlink_logging_data_t *msg)
         begin = msg->first_message_offset;
     }
 
-    if (!msg->length)
+    if (!msg->length) {
         return;
+    }
 
     msg->length = msg->length - begin;
     memcpy(&_buffer[_buffer_index + _buffer_len], &msg->data[begin], msg->length);
@@ -340,8 +314,9 @@ bool ULog::_logging_flush()
 {
     while (_buffer_partial_len) {
         const ssize_t r = write(_file, _buffer_partial, _buffer_partial_len);
-        if (r == 0 || (r == -1 && errno == EAGAIN))
+        if (r == 0 || (r == -1 && errno == EAGAIN)) {
             return true;
+        }
         if (r < 0) {
             log_error("Unable to write to ULog file: (%m)");
             return false;
@@ -351,21 +326,12 @@ bool ULog::_logging_flush()
         memmove(_buffer_partial, &_buffer_partial[r], _buffer_partial_len);
     }
 
-    if (!_waiting_flags && !_meta_written) {
-        write_meta_information(_file, _meta_written);
-    }
-
     while (_buffer_len >= sizeof(struct ulog_msg_header) && !_buffer_partial_len) {
-        struct ulog_msg_header *header = (struct ulog_msg_header *)&_buffer[_buffer_index];
+        auto *header = (struct ulog_msg_header *)&_buffer[_buffer_index];
         const uint16_t full_msg_size = header->msg_size + sizeof(struct ulog_msg_header);
-        const char msg_type = header->msg_type;
 
         if (full_msg_size > _buffer_len) {
             break;
-        }
-
-        if (msg_type == 'B') {
-            _waiting_flags = false;
         }
 
         const ssize_t r = write(_file, header, full_msg_size);
@@ -374,8 +340,9 @@ bool ULog::_logging_flush()
             _buffer_index += full_msg_size;
             continue;
         }
-        if (r == 0 || (r == -1 && errno == EAGAIN))
+        if (r == 0 || (r == -1 && errno == EAGAIN)) {
             break;
+        }
         if (r < 0) {
             log_error("Unable to write to ULog file: (%m)");
             return false;
@@ -388,7 +355,8 @@ bool ULog::_logging_flush()
             _buffer_partial_len = 0;
             log_error("Partial buffer is not big enough to store the "
                       "ULog entry(type=%c len=%u), ULog file is now corrupt.",
-                      header->msg_type, full_msg_size);
+                      header->msg_type,
+                      full_msg_size);
             break;
         }
 

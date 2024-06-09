@@ -1,7 +1,7 @@
 /*
  * This file is part of the MAVLink Router project
  *
- * Copyright (C) 2017  Intel Corporation. All rights reserved.
+ * Copyright (C) 2023 Petrosilius <petrosilius@searchwing.org>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,32 +17,26 @@
  */
 #pragma once
 
-#include <memory>
-
-#include "endpoint.h"
 #include "logendpoint.h"
 
-class AutoLog : public LogEndpoint {
+#define BUFFER_LEN 2048
+
+class TLog : public LogEndpoint {
 public:
-    AutoLog(LogOptions conf)
-        : LogEndpoint{"AutoLog", conf}
+    TLog(LogOptions conf)
+        : LogEndpoint{"TLog", conf}
     {
     }
 
-    int write_msg(const struct buffer *buffer) override;
-    int flush_pending_msgs() override { return -ENOSYS; }
-
     bool start() override;
     void stop() override;
-    void print_statistics() override;
+
+    int write_msg(const struct buffer *pbuf) override;
+    int flush_pending_msgs() override { return -ENOSYS; }
 
 protected:
-    ssize_t _read_msg(uint8_t *buf, size_t len) override { return 0; }
+    ssize_t _read_msg(uint8_t *buf, size_t len) override { return 0; };
+    bool _logging_start_timeout() override;
 
-    // These functions should never be called
-    const char *_get_logfile_extension() override { return ""; };
-    bool _logging_start_timeout() override { return true; };
-
-private:
-    std::unique_ptr<LogEndpoint> _logger;
+    const char *_get_logfile_extension() override { return "tlog"; };
 };

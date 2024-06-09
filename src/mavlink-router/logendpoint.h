@@ -17,33 +17,43 @@
  */
 #pragma once
 
+#include <common/conf_file.h>
+
 #include <aio.h>
 #include <assert.h>
 #include <dirent.h>
+#include <string>
 
 #include "endpoint.h"
 #include "timeout.h"
 
 #define LOG_ENDPOINT_SYSTEM_ID 2
 
-
 enum class LogMode {
-    always = 0,         ///< Log from start until mavlink-router exits
-    while_armed,        ///< Start logging when the vehicle is armed until it's disarmed
+    always = 0,  ///< Log from start until mavlink-router exits
+    while_armed, ///< Start logging when the vehicle is armed until it's disarmed
 
-    disabled            ///< Do not try to start logging (only used internally)
+    disabled ///< Do not try to start logging (only used internally)
 };
 
+struct LogOptions {
+    enum class MavDialect { Auto, Common, Ardupilotmega };
+
+    std::string logs_dir;                         // conf "Log" or CLI "log"
+    LogMode log_mode{LogMode::always};            // conf "LogMode"
+    MavDialect mavlink_dialect{MavDialect::Auto}; // conf "MavlinkDialect"
+    unsigned long min_free_space;                 // conf "MinFreeSpace"
+    unsigned long max_log_files;                  // conf "MaxLogFiles"
+    int fcu_id{-1};                               // conf "LogSystemId"
+    bool log_telemetry{false};                    // conf "LogTelemetry"
+};
 
 class LogEndpoint : public Endpoint {
 public:
-    LogEndpoint(const char *name, const char *logs_dir, LogMode mode, unsigned long min_free_space,
-                unsigned long max_files, bool heartbeat);
+    LogEndpoint(std::string name, LogOptions conf);
 
     virtual bool start();
     virtual void stop();
-
-    bool has_active_stop_timeout() { return _logging_stop_timeout != nullptr; }
 
     /**
      * Check existing log files and mark logs as read-only if needed.
@@ -52,57 +62,42 @@ public:
      */
     void mark_unfinished_logs();
 
-    /**
-     * On top of the existing criteria from Endpoints,
-     * LogEndpoints have stricter criteria for accepting a mavlink message.
-     * The CRC checksum must be valid in order to avoid logging corrupt data.
-     * The usual Endpoint criteria for accepting a message are also applied.
-     */
-    bool accept_msg(int target_sysid, int target_compid, uint8_t src_sysid, uint8_t src_compid, bool crc_valid, uint32_t msg_id);
+    static const ConfFile::OptionsTable option_table[];
+    static int parse_mavlink_dialect(const char *val, size_t val_len, void *storage,
+                                     size_t storage_len);
+    static int parse_log_mode(const char *val, size_t val_len, void *storage, size_t storage_len);
+    static int parse_fcu_id(const char *val, size_t val_len, void *storage, size_t storage_len);
 
 protected:
-    const char *_logs_dir;
-    int _target_system_id = -1;
+    LogOptions _config;
+    int _target_system_id;
     int _file = -1;
-    unsigned long _min_free_space;
-    unsigned long _max_files;
-    LogMode _mode;
 
-    Timeout *_logging_start_timeout = nullptr;
-    Timeout *_logging_stop_timeout = nullptr;
-    Timeout *_fsync_timeout = nullptr;
-    Timeout *_alive_check_timeout = nullptr;
+    struct {
+        Timeout *logging_start = nullptr;
+        Timeout *fsync = nullptr;
+        Timeout *alive = nullptr;
+    } _timeout;
     uint32_t _timeout_write_total = 0;
     aiocb _fsync_cb = {};
-
-    /* heartbeat components */
-    uint8_t _system_status = MAV_STATE_STANDBY;
-    virtual void _start_heartbeat();
-    Timeout * _heartbeat_timer = nullptr;
-    bool _broadcast_log_heartbeat();
 
     virtual const char *_get_logfile_extension() = 0;
 
     void _send_msg(const mavlink_message_t *msg, int target_sysid);
-    void _remove_start_timeout();
-    void _remove_stop_timeout();
+    void _remove_logging_start_timeout();
     bool _start_alive_timeout();
 
-    virtual bool _start_timeout() = 0;
-    virtual bool _stop_timeout() = 0;
+    virtual bool _logging_start_timeout() = 0;
     virtual bool _alive_timeout();
 
     bool _fsync();
 
-    void _handle_auto_start_stop(uint32_t msg_id, uint8_t source_system_id,
-            uint8_t source_component_id, uint8_t *payload);
-
-    virtual void _close_file();
+    void _handle_auto_start_stop(const struct buffer *pbuf);
 
 private:
     int _get_file(const char *extension);
-    uint32_t _get_prefix(DIR *dir);
-    DIR *_open_or_create_dir(const char *name);
+    static uint32_t _get_prefix(DIR *dir);
+    static DIR *_open_or_create_dir(const char *name);
 
     /**
      * Delete old logs until a certain amount of free space and total number of log files are met.

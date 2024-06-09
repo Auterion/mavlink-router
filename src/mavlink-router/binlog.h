@@ -24,9 +24,8 @@
 
 class BinLog : public LogEndpoint {
 public:
-    BinLog(const char *logs_dir, LogMode mode, unsigned long min_free_space,
-           unsigned long max_files, bool heartbeat)
-        : LogEndpoint{"BinLog", logs_dir, mode, min_free_space, max_files, heartbeat}
+    BinLog(LogOptions conf)
+        : LogEndpoint{"BinLog", conf}
     {
     }
 
@@ -35,15 +34,15 @@ public:
 
     bool logging_start_timeout();
 
-    int write_msg(const struct buffer *pbuf) override;
+    int write_msg(const struct buffer *buffer) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
 protected:
     ssize_t _read_msg(uint8_t *buf, size_t len) override { return 0; };
-    bool _start_timeout() override;
-    bool _stop_timeout() override;
+    bool _logging_start_timeout() override;
 
     const char *_get_logfile_extension() override { return "bin"; };
+
 private:
     uint32_t _last_acked_seqno = 0;
 

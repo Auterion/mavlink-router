@@ -28,22 +28,21 @@
 
 #include "mainloop.h"
 
-bool BinLog::_start_timeout()
+bool BinLog::_logging_start_timeout()
 {
     mavlink_message_t msg;
 
-    mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg, _target_system_id,
-                                             MAV_COMP_ID_ALL, MAV_REMOTE_LOG_DATA_BLOCK_START, 1);
+    mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID,
+                                             MAV_COMP_ID_ALL,
+                                             &msg,
+                                             _target_system_id,
+                                             MAV_COMP_ID_ALL,
+                                             MAV_REMOTE_LOG_DATA_BLOCK_START,
+                                             1);
+
     _send_msg(&msg, _target_system_id);
 
     return true;
-}
-
-bool BinLog::_stop_timeout()
-{
-    // TODO: Stop timeout not implemented for binlog, see example in ulog
-    _remove_stop_timeout();
-    return false;
 }
 
 bool BinLog::start()
@@ -73,59 +72,42 @@ void BinLog::_send_stop()
 {
     mavlink_message_t msg;
 
-    mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg, _target_system_id,
-                                             MAV_COMP_ID_ALL, MAV_REMOTE_LOG_DATA_BLOCK_STOP, 1);
+    mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID,
+                                             MAV_COMP_ID_ALL,
+                                             &msg,
+                                             _target_system_id,
+                                             MAV_COMP_ID_ALL,
+                                             MAV_REMOTE_LOG_DATA_BLOCK_STOP,
+                                             1);
     _send_msg(&msg, _target_system_id);
 }
 
 int BinLog::write_msg(const struct buffer *buffer)
 {
     const bool mavlink2 = buffer->data[0] == MAVLINK_STX;
-    uint32_t msg_id;
-    uint8_t *payload;
-    uint16_t payload_len;
     uint8_t trimmed_zeros;
-    uint8_t source_system_id;
-    uint8_t source_component_id;
     mavlink_remote_log_data_block_t *binlog_data;
 
-    if (mavlink2) {
-        struct mavlink_router_mavlink2_header *msg
-            = (struct mavlink_router_mavlink2_header *)buffer->data;
-        msg_id = msg->msgid;
-        payload = buffer->data + sizeof(struct mavlink_router_mavlink2_header);
-        payload_len = msg->payload_len;
-        source_system_id = msg->sysid;
-        source_component_id = msg->compid;
-    } else {
-        struct mavlink_router_mavlink1_header *msg
-            = (struct mavlink_router_mavlink1_header *)buffer->data;
-        msg_id = msg->msgid;
-        payload = buffer->data + sizeof(struct mavlink_router_mavlink1_header);
-        payload_len = msg->payload_len;
-        source_system_id = msg->sysid;
-        source_component_id = msg->compid;
-    }
-
     /* set the expected system id to the first autopilot that we get a heartbeat from */
-    if (_target_system_id == -1 && msg_id == MAVLINK_MSG_ID_HEARTBEAT
-        && source_component_id == MAV_COMP_ID_AUTOPILOT1) {
-        _target_system_id = source_system_id;
+    if (_target_system_id == -1 && buffer->curr.msg_id == MAVLINK_MSG_ID_HEARTBEAT
+        && buffer->curr.src_compid == MAV_COMP_ID_AUTOPILOT1) {
+        _target_system_id = buffer->curr.src_sysid;
     }
 
     /* Check if we should start or stop logging */
-    _handle_auto_start_stop(msg_id, source_system_id, source_component_id, payload);
+    _handle_auto_start_stop(buffer);
 
     /* Check if we are interested in this msg_id */
-    if (msg_id != MAVLINK_MSG_ID_REMOTE_LOG_DATA_BLOCK) {
+    if (buffer->curr.msg_id != MAVLINK_MSG_ID_REMOTE_LOG_DATA_BLOCK) {
         return buffer->len;
     }
 
-    const mavlink_msg_entry_t *msg_entry = mavlink_get_msg_entry(msg_id);
+    const mavlink_msg_entry_t *msg_entry = mavlink_get_msg_entry(buffer->curr.msg_id);
     if (!msg_entry) {
         return buffer->len;
     }
 
+    uint16_t payload_len = buffer->curr.payload_len;
     if (payload_len > msg_entry->max_msg_len) {
         payload_len = msg_entry->max_msg_len;
     }
@@ -139,15 +121,15 @@ int BinLog::write_msg(const struct buffer *buffer)
     if (trimmed_zeros) {
         binlog_data
             = (mavlink_remote_log_data_block_t *)alloca(sizeof(mavlink_remote_log_data_block_t));
-        memcpy(binlog_data, payload, payload_len);
-        memset((uint8_t*)binlog_data + payload_len, 0, trimmed_zeros);
+        memcpy(binlog_data, buffer->curr.payload, payload_len);
+        memset((uint8_t *)binlog_data + payload_len, 0, trimmed_zeros);
     } else {
-        binlog_data = (mavlink_remote_log_data_block_t *)payload;
+        binlog_data = (mavlink_remote_log_data_block_t *)buffer->curr.payload;
     }
 
-    if (_logging_start_timeout) {
+    if (_timeout.logging_start) {
         if (binlog_data->seqno == 0) {
-            _remove_start_timeout();
+            _remove_logging_start_timeout();
             if (!_start_alive_timeout()) {
                 log_warning("Could not start liveness timeout - mavlink router log won't be able "
                             "to detect if flight stack stopped");
@@ -172,8 +154,13 @@ void BinLog::_send_ack(uint32_t seqno)
 
     // Message filled a gap, or is duplicated. just send the ack
     if (seqno < _last_acked_seqno) {
-        mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg,
-                                                 _target_system_id, MAV_COMP_ID_ALL, seqno, 1);
+        mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID,
+                                                 MAV_COMP_ID_ALL,
+                                                 &msg,
+                                                 _target_system_id,
+                                                 MAV_COMP_ID_ALL,
+                                                 seqno,
+                                                 MAV_REMOTE_LOG_DATA_BLOCK_ACK);
         _send_msg(&msg, _target_system_id);
         return;
     }
@@ -181,15 +168,25 @@ void BinLog::_send_ack(uint32_t seqno)
     // TODO maybe a threshould of [n]acks to be sent?
     // TODO send ack to source only?
     // Send nacks regarding unseen seqno
-    for (uint32_t i = _last_acked_seqno; i < seqno; i++) {
-        mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg,
-                                                 _target_system_id, MAV_COMP_ID_ALL, seqno, 0);
+    for (uint32_t i = _last_acked_seqno + 1; i < seqno; i++) {
+        mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID,
+                                                 MAV_COMP_ID_ALL,
+                                                 &msg,
+                                                 _target_system_id,
+                                                 MAV_COMP_ID_ALL,
+                                                 seqno,
+                                                 MAV_REMOTE_LOG_DATA_BLOCK_NACK);
         _send_msg(&msg, _target_system_id);
     }
 
     // Send ack to seen seqno
-    mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID, MAV_COMP_ID_ALL, &msg, _target_system_id,
-                                             MAV_COMP_ID_ALL, seqno, 1);
+    mavlink_msg_remote_log_block_status_pack(LOG_ENDPOINT_SYSTEM_ID,
+                                             MAV_COMP_ID_ALL,
+                                             &msg,
+                                             _target_system_id,
+                                             MAV_COMP_ID_ALL,
+                                             seqno,
+                                             MAV_REMOTE_LOG_DATA_BLOCK_ACK);
     _send_msg(&msg, _target_system_id);
     _last_acked_seqno = seqno;
 }
@@ -213,7 +210,7 @@ void BinLog::_logging_data_process(mavlink_remote_log_data_block_t *msg)
     if (r != MAVLINK_MSG_REMOTE_LOG_DATA_BLOCK_FIELD_DATA_LEN) {
         // partial writes are handled by not sending ack. Flight stack should resend
         // msg. We hope that partial writes are rare enough
-        log_error("Log partial write %ld", r);
+        log_error("Log partial write %zd", r);
         return;
     }
 

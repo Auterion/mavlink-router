@@ -17,74 +17,61 @@
  */
 #pragma once
 
-#include <signal.h>
-
-#include <atomic>
+#include <memory>
 #include <string>
-#include <map>
+#include <vector>
+
+#include "common/log.h"
 
 #include "binlog.h"
 #include "comm.h"
+#include "dedup.h"
 #include "endpoint.h"
 #include "timeout.h"
 #include "ulog.h"
+
+struct Configuration {
+    std::string conf_file_name;        ///< CLI "conf-file" only!
+    std::string conf_dir;              ///< CLI "conf-dir" only!
+    unsigned long tcp_port{5760};      ///< conf "TcpServerPort" or CLI "tcp-port"
+    bool report_msg_statistics{false}; ///< conf "ReportStats" or CLI "report_msg_statistics"
+    Log::Level debug_log_level{Log::Level::INFO}; ///< conf "DebugLogLevel" or CLI "debug-log-level"
+    unsigned long dedup_period_ms;                ///< conf "DeduplicationPeriod"
+
+    LogOptions log_config; ///< logging is in General config section, but internally an endpoint
+    std::vector<UartEndpointConfig> uart_configs;
+    std::vector<UdpEndpointConfig> udp_configs;
+    std::vector<TcpEndpointConfig> tcp_configs;
+    unsigned long sniffer_sysid;
+};
 
 struct endpoint_entry {
     struct endpoint_entry *next;
     TcpEndpoint *endpoint;
 };
 
-struct dynamic_command {
-    enum Command { add, remove, unknown_command } command = unknown_command;
-    enum Protocol { udp, unknown_protocol } protocol = unknown_protocol;
-    std::string name, address;
-    int port = -1;
-    bool eavesdropping = false;
-    int coalesce_bytes = 0, coalesce_ms = 0;
-    std::vector<int> coalesce_nodelay_ids;
-};
-
 class Mainloop {
 public:
-    /*
-     * Sets up main event handling loop. There can be only a single instance
-     * of it in the whole process at any given point in time.
-     */
-    Mainloop();
-    Mainloop(const Mainloop &) = delete;
-    Mainloop &operator=(const Mainloop &) = delete;
-
-    ~Mainloop();
-
-    int add_fd(int fd, void *data, int events);
-    int mod_fd(int fd, void *data, int events);
-    int remove_fd(int fd);
+    int open();
+    int add_fd(int fd, void *data, int events) const;
+    int mod_fd(int fd, void *data, int events) const;
+    int remove_fd(int fd) const;
     int loop();
+    void route_msg(struct buffer *buf);
+    void handle_tcp_connection();
+    int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const;
+    void process_tcp_hangups();
+    Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
+    void del_timeout(Timeout *t);
+    void mod_timeout(Timeout *t, uint32_t timeout_msec);
+
+    bool add_endpoints(const Configuration &config);
+    void clear_endpoints();
 
     /*
-     * Runs single iteration of mainloop, i.e. single round of event handling.
-     * This will wait for at most the given time (indefinitely if -1) and
-     * within this time dispatch of all handling events (socket events &
-     * timers.
+     * Returns true, if the message was already received earlier
      */
-    int run_single(int timeout_msec);
-
-    void route_msg(struct buffer *buf, int target_sysid, int target_compid, int sender_sysid,
-                   int sender_compid, bool crc_valid, uint32_t msg_id = UINT32_MAX);
-    void handle_read(Endpoint *e);
-    void handle_canwrite(Endpoint *e);
-    void handle_tcp_connection();
-    int write_msg(Endpoint *e, const struct buffer *buf);
-    void process_tcp_hangups();
-    Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void*)> cb, const void *data);
-    void set_timeout(Timeout *t, uint32_t timeout_msec);
-    void del_timeout(Timeout *t);
-
-    bool add_endpoints(Mainloop &mainloop, struct options *opt);
-
-    bool add_dynamic_endpoint(const dynamic_command& command);
-    bool remove_dynamic_endpoint(const dynamic_command& command);
-    bool remove_dynamic_endpoint(Endpoint *endpoint);
+    bool dedup_check_msg(const buffer *buf);
 
     void print_statistics();
 
@@ -92,123 +79,59 @@ public:
     bool should_process_tcp_hangups = false;
 
     /*
-     * Return singleton for this class, tied to the main thread.
+     * Return singleton for this class, tied to the main thread. It needds to
+     * be called after a call to Mainloop::init().
      */
-    static Mainloop &get_instance();
+    static Mainloop &get_instance()
+    {
+        assert(_initialized);
+        return _instance;
+    }
 
     /*
-     * Request that loop exits "eventually". This (and only this!) function
-     * is async-signal safe.
+     * Initialize and return singleton.
+     */
+    static Mainloop &init();
+
+    /*
+     * De-initialize singleton so we can start a fresh on the same
+     * thread
+     */
+    static void teardown();
+
+    static Mainloop &instance();
+
+    /*
+     * Request that loop exits on next iteration.
      */
     void request_exit(int retcode);
-
-    /*
-     * Expose list of registered endpoints (primarily for direct interaction
-     * in tests).
-     */
-    inline const std::vector<std::unique_ptr<Endpoint>>& endpoints() const
-    {
-        return _endpoints;
-    }
-
-    /*
-     * Expose lsit of registered dynamic endpoints (mostly for tests)
-     */
-    inline const std::map<std::string, Endpoint *>& dynamic_endpoints() const {
-        return _dynamic_endpoints;
-    }
-
-    static int parse(const char* cmd_string, dynamic_command& cmd);
 
 private:
     static const unsigned int LOG_AGGREGATE_INTERVAL_SEC = 5;
 
-    endpoint_entry *g_tcp_endpoints = nullptr;
-    std::vector<std::unique_ptr<Endpoint>> _endpoints;
-    int g_tcp_fd = -1;
-    LogEndpoint *_log_endpoint = nullptr;
-
-    std::map<std::string, dynamic_command::Command> _pipe_commands;
-    std::map<std::string, Endpoint *> _dynamic_endpoints;
-    int _pipefd = -1;
-    struct options* _options{nullptr};
+    std::vector<std::shared_ptr<Endpoint>> g_endpoints{};
+    int g_tcp_fd = -1; ///< for TCP server
+    std::shared_ptr<LogEndpoint> _log_endpoint{nullptr};
 
     Timeout *_timeouts = nullptr;
 
-    std::atomic<bool> _should_exit {false};
+    Dedup _msg_dedup{0}; // disabled by default
 
     struct {
         uint32_t msg_to_unknown = 0;
     } _errors_aggregate;
-    int _retcode = 0;
 
-    void free_endpoints();
+    int _retcode;
+
     int tcp_open(unsigned long tcp_port);
     void _del_timeouts();
-    int _add_tcp_endpoint(TcpEndpoint *tcp);
-    void _add_tcp_retry(TcpEndpoint *tcp);
     bool _retry_timeout_cb(void *data);
     bool _log_aggregate_timeout(void *data);
-    void _init_pipe();
-    void _handle_pipe();
-    static int _watchdogIntervalUs();
 
-    static Mainloop* instance;
-};
+    Mainloop() = default;
+    Mainloop(const Mainloop &) = delete;
+    Mainloop &operator=(const Mainloop &) = delete;
 
-class MainloopSignalHandlers {
-public:
-    explicit MainloopSignalHandlers(Mainloop* mainloop);
-    ~MainloopSignalHandlers();
-
-private:
-    static void signal_handler_function(int signo);
-
-    static Mainloop* mainloop_instance;
-
-    struct sigaction _old_sigterm;
-    struct sigaction _old_sigint;
-    struct sigaction _old_sigpipe;
-};
-
-enum endpoint_type { Tcp, Uart, Udp, Unknown };
-enum mavlink_dialect { Auto, Common, Ardupilotmega };
-
-struct endpoint_config {
-    struct endpoint_config *next;
-    char *name;
-    enum endpoint_type type;
-    union {
-        struct {
-            char *address;
-            long unsigned port;
-            int retry_timeout;
-            bool eavesdropping;     // bind to local port specified, instead of send to remote port
-            int coalesce_ms;        // max time to hold data to try to send packets together
-            int coalesce_bytes;     // never send packets larger than this size
-            char *coalesce_nodelay; // immediately send if a mavlink msg_id is matching this
-        };
-        struct {
-            char *device;
-            std::vector<unsigned long> *bauds;
-            bool flowcontrol;
-        };
-    };
-    char *filter;
-    uint32_t dropout_percentage;
-};
-
-struct options {
-    struct endpoint_config *endpoints;
-    const char *conf_file_name;
-    const char *conf_dir;
-    unsigned long tcp_port;
-    bool report_msg_statistics;
-    char *logs_dir;
-    LogMode log_mode;
-    int debug_log_level;
-    enum mavlink_dialect mavlink_dialect;
-    unsigned long min_free_space;
-    unsigned long max_log_files;
-    bool heartbeat;
+    static Mainloop _instance;
+    static bool _initialized;
 };

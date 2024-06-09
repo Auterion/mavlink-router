@@ -19,6 +19,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <common/log.h>
@@ -41,62 +43,59 @@
 #include "mainloop.h"
 
 #define ALIVE_TIMEOUT 5
-#define MAX_RETRIES 10
+#define MAX_RETRIES   10
 
-LogEndpoint::LogEndpoint(const char *name, const char *logs_dir, LogMode mode,
-                         unsigned long min_free_space, unsigned long max_files, bool heartbeat)
-    : Endpoint{name}
-    , _logs_dir{logs_dir}
-    , _min_free_space(min_free_space)
-    , _max_files(max_files)
-    , _mode(mode)
+// clang-format off
+const ConfFile::OptionsTable LogEndpoint::option_table[] = {
+    {"Log",             false, ConfFile::parse_stdstring,           OPTIONS_TABLE_STRUCT_FIELD(LogOptions, logs_dir)},
+    {"LogMode",         false, LogEndpoint::parse_log_mode,         OPTIONS_TABLE_STRUCT_FIELD(LogOptions, log_mode)},
+    {"MavlinkDialect",  false, LogEndpoint::parse_mavlink_dialect,  OPTIONS_TABLE_STRUCT_FIELD(LogOptions, mavlink_dialect)},
+    {"MinFreeSpace",    false, ConfFile::parse_ul,                  OPTIONS_TABLE_STRUCT_FIELD(LogOptions, min_free_space)},
+    {"MaxLogFiles",     false, ConfFile::parse_ul,                  OPTIONS_TABLE_STRUCT_FIELD(LogOptions, max_log_files)},
+    {"LogSystemId",     false, LogEndpoint::parse_fcu_id,           OPTIONS_TABLE_STRUCT_FIELD(LogOptions, fcu_id)},
+    {"LogTelemetry",    false, ConfFile::parse_bool,                OPTIONS_TABLE_STRUCT_FIELD(LogOptions, log_telemetry)},
+    {}
+};
+// clang-format on
+
+LogEndpoint::LogEndpoint(std::string name, LogOptions conf)
+    : Endpoint{ENDPOINT_TYPE_LOG, std::move(name)}
+    , _config{conf}
 {
-    assert(_logs_dir);
-    _add_sys_comp_id(LOG_ENDPOINT_SYSTEM_ID << 8);
-
-    if (heartbeat) {
-        _start_heartbeat();
-    }
-
+    assert(!_config.logs_dir.empty());
+    _add_sys_comp_id(LOG_ENDPOINT_SYSTEM_ID, 0);
     _fsync_cb.aio_fildes = -1;
 
 #if HAVE_DECL_AIO_INIT
-    aioinit aio_init_data {};
+    aioinit aio_init_data{};
     aio_init_data.aio_threads = 1;
     aio_init_data.aio_num = 1;
     aio_init_data.aio_idle_time = 3; // make sure to keep the thread running
     aio_init(&aio_init_data);
 #endif
-}
-
-bool LogEndpoint::_broadcast_log_heartbeat() {
-
-    if(_target_system_id != -1) {
-        mavlink_message_t msg = {};
-        mavlink_heartbeat_t heartbeat = {};
-
-        heartbeat.type = MAV_TYPE_ONBOARD_CONTROLLER;
-        heartbeat.system_status = _system_status;
-        mavlink_msg_heartbeat_encode(_target_system_id, MAV_COMP_ID_LOG, &msg, &heartbeat);
-        _send_msg(&msg, _target_system_id);
+    if (_config.fcu_id != -1) {
+        _target_system_id = _config.fcu_id;
+    } else {
+        _target_system_id = -1;
     }
-
-    return true;
 }
 
 void LogEndpoint::_send_msg(const mavlink_message_t *msg, int target_sysid)
 {
-    uint8_t data[MAVLINK_MAX_PACKET_LEN];
-    struct buffer buffer {
-        0, data
-    };
+    uint8_t data[MAVLINK_MAX_PACKET_LEN] = {};
+    struct buffer buffer = {};
 
-    // Message was created in memory. Assume it's valid.
-    const bool crc_valid = true;
-
+    buffer.data = data;
     buffer.len = mavlink_msg_to_send_buffer(data, msg);
-    Mainloop::get_instance().route_msg(&buffer, target_sysid, MAV_COMP_ID_ALL, msg->sysid,
-                                       msg->compid, crc_valid);
+    buffer.curr.msg_id = msg->msgid;
+    buffer.curr.target_sysid = target_sysid;
+    buffer.curr.target_compid = MAV_COMP_ID_ALL;
+    buffer.curr.src_sysid = msg->sysid;
+    buffer.curr.src_compid = msg->compid;
+    /* don't bother with it as it's only used by Log backends */
+    buffer.curr.payload_len = 0;
+
+    Mainloop::get_instance().route_msg(&buffer);
 
     _stat.read.total++;
     _stat.read.handled++;
@@ -105,7 +104,7 @@ void LogEndpoint::_send_msg(const mavlink_message_t *msg, int target_sysid)
 
 void LogEndpoint::mark_unfinished_logs()
 {
-    DIR *dir = opendir(_logs_dir);
+    DIR *dir = opendir(_config.logs_dir.c_str());
 
     // Assume the directory does not exist if opendir failed
     if (!dir) {
@@ -116,17 +115,20 @@ void LogEndpoint::mark_unfinished_logs()
     uint32_t u;
 
     while ((ent = readdir(dir)) != nullptr) {
-        if (sscanf(ent->d_name, "%u-", &u) != 1)
+        if (sscanf(ent->d_name, "%u-", &u) != 1) {
             continue;
+        }
 
         char log_file[PATH_MAX];
         struct stat file_stat;
-        if (snprintf(log_file, sizeof(log_file), "%s/%s", _logs_dir, ent->d_name)
-            >= (int)sizeof(log_file))
+        if (snprintf(log_file, sizeof(log_file), "%s/%s", _config.logs_dir.c_str(), ent->d_name)
+            >= (int)sizeof(log_file)) {
             continue;
+        }
 
-        if (stat(log_file, &file_stat))
+        if (stat(log_file, &file_stat)) {
             continue;
+        }
 
         if (S_ISREG(file_stat.st_mode) && (file_stat.st_mode & S_IWUSR)) {
             log_info("File %s not read-only yet, marking as RO", ent->d_name);
@@ -138,24 +140,30 @@ void LogEndpoint::mark_unfinished_logs()
 
 void LogEndpoint::_delete_old_logs()
 {
-
     struct statvfs buf;
     uint64_t free_space;
-    if (statvfs(_logs_dir, &buf) == 0) {
-        free_space = (uint64_t) buf.f_bsize * buf.f_bavail;
+
+    if (statvfs(_config.logs_dir.c_str(), &buf) == 0) {
+        free_space = (uint64_t)buf.f_bsize * buf.f_bavail;
+    } else if (errno == ENOENT) {
+        // Ignore error - we don't have any logs to delete if directory
+        // doesn't exist
+        return;
     } else {
         free_space = UINT64_MAX;
         log_error("[Log Deletion] Error when measuring free disk space: %m");
     }
-    log_debug("[Log Deletion]  Total free space: %lumb. Min free space: %lumb",
-              free_space / (1ul << 20), _min_free_space / (1ul << 20));
+
+    log_debug("[Log Deletion]  Total free space: %" PRIu64 "MB. Min free space: %luMB",
+              free_space / (1ul << 20),
+              _config.min_free_space / (1ul << 20));
 
     // This check is not necessary, it just saves on some file IO.
-    if (free_space > _min_free_space && _max_files == 0) {
+    if (free_space > _config.min_free_space && _config.max_log_files == 0) {
         return;
     }
 
-    DIR *dir = opendir(_logs_dir);
+    DIR *dir = opendir(_config.logs_dir.c_str());
 
     // Assume the directory does not exist if opendir failed
     if (!dir) {
@@ -180,7 +188,14 @@ void LogEndpoint::_delete_old_logs()
     while ((ent = readdir(dir)) != nullptr) {
         // Even though we don't need the timestamp, we want to match as much of the filename as
         // possible, so we don't accidentally delete something that isn't a log.
-        if (sscanf(ent->d_name, "%u-%u-%u-%u_%u-%u-%u.", &idx, &year, &month, &day, &hour, &minute,
+        if (sscanf(ent->d_name,
+                   "%u-%u-%u-%u_%u-%u-%u.",
+                   &idx,
+                   &year,
+                   &month,
+                   &day,
+                   &hour,
+                   &minute,
                    &second)
             == 7) {
             struct stat file_stat;
@@ -195,11 +210,12 @@ void LogEndpoint::_delete_old_logs()
         }
     }
 
-    // If the configured value for _min_free_space is 0, then we don't have to do anything special.
-    int64_t bytes_to_delete = _min_free_space - free_space;
-    // If the configured value for _max_files is 0, then set this to -1 to indicate that we've
+    // If the configured value for min_free_space is 0, then we don't have to do anything special.
+    int64_t bytes_to_delete = _config.min_free_space - free_space;
+    // If the configured value for max_log_files is 0, then set this to -1 to indicate that we've
     // already deleted enough files.
-    ssize_t files_to_delete = _max_files > 0 ? (ssize_t)file_map.size() - _max_files : -1;
+    ssize_t files_to_delete
+        = _config.max_log_files > 0 ? (ssize_t)file_map.size() - _config.max_log_files : -1;
 
     log_debug("[Log Deletion] Files to delete: %zd", files_to_delete);
 
@@ -215,9 +231,14 @@ void LogEndpoint::_delete_old_logs()
         std::string &filename = std::get<0>(pair.second);
         const unsigned long filesize = std::get<1>(pair.second);
         char log_file[PATH_MAX];
-        if (snprintf(log_file, sizeof(log_file), "%s/%s", _logs_dir, filename.c_str())
+        if (snprintf(log_file,
+                     sizeof(log_file),
+                     "%s/%s",
+                     _config.logs_dir.c_str(),
+                     filename.c_str())
             >= (int)sizeof(log_file)) {
-            log_error("Directory + filename %s is longer than PATH_MAX of %d", filename.c_str(),
+            log_error("Directory + filename %s is longer than PATH_MAX of %d",
+                      filename.c_str(),
                       PATH_MAX);
             continue;
         }
@@ -266,7 +287,7 @@ DIR *LogEndpoint::_open_or_create_dir(const char *name)
         r = mkdir_p(name, strlen(name), 0755);
         if (r < 0) {
             errno = -r;
-            return NULL;
+            return nullptr;
         }
         dir = opendir(name);
     }
@@ -276,14 +297,14 @@ DIR *LogEndpoint::_open_or_create_dir(const char *name)
 
 int LogEndpoint::_get_file(const char *extension)
 {
-    time_t t = time(NULL);
+    time_t t = time(nullptr);
     struct tm *timeinfo = localtime(&t);
     uint32_t i;
     int j, r;
     DIR *dir;
     int dir_fd;
 
-    dir = _open_or_create_dir(_logs_dir);
+    dir = _open_or_create_dir(_config.logs_dir.c_str());
     if (!dir) {
         log_error("Could not open log dir (%m)");
         return -1;
@@ -295,9 +316,17 @@ int LogEndpoint::_get_file(const char *extension)
     dir_fd = dirfd(dir);
 
     for (j = 0; j <= MAX_RETRIES; j++) {
-        r = snprintf(_filename, sizeof(_filename), "%05u-%i-%02i-%02i_%02i-%02i-%02i.%s", i + j,
-                     timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
-                     timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, extension);
+        r = snprintf(_filename,
+                     sizeof(_filename),
+                     "%05u-%i-%02i-%02i_%02i-%02i-%02i.%s",
+                     i + j,
+                     timeinfo->tm_year + 1900,
+                     timeinfo->tm_mon + 1,
+                     timeinfo->tm_mday,
+                     timeinfo->tm_hour,
+                     timeinfo->tm_min,
+                     timeinfo->tm_sec,
+                     extension);
 
         if (r < 1 || (size_t)r >= sizeof(_filename)) {
             log_error("Error formatting Log file name: (%m)");
@@ -327,41 +356,22 @@ int LogEndpoint::_get_file(const char *extension)
 
 void LogEndpoint::stop()
 {
-    if (_logging_stop_timeout) {
-        // a stop was already requested
-        return;
-    }
-
     Mainloop &mainloop = Mainloop::get_instance();
-    if (_logging_start_timeout) {
-        mainloop.del_timeout(_logging_start_timeout);
-        _logging_start_timeout = nullptr;
+    if (_timeout.logging_start) {
+        mainloop.del_timeout(_timeout.logging_start);
+        _timeout.logging_start = nullptr;
     }
 
-    if (_alive_check_timeout) {
-        mainloop.del_timeout(_alive_check_timeout);
-        _alive_check_timeout = nullptr;
+    if (_timeout.alive) {
+        mainloop.del_timeout(_timeout.alive);
+        _timeout.alive = nullptr;
     }
 
-    if (_fsync_timeout) {
-        mainloop.del_timeout(_fsync_timeout);
-        _fsync_timeout = nullptr;
+    if (_timeout.fsync) {
+        mainloop.del_timeout(_timeout.fsync);
+        _timeout.fsync = nullptr;
     }
 
-    _logging_stop_timeout = Mainloop::get_instance().add_timeout(
-        MSEC_PER_SEC / 10, std::bind(&LogEndpoint::_stop_timeout, this), this);
-    if (_logging_stop_timeout) {
-        if (!_stop_timeout()) {
-            _close_file();
-        }
-    } else {
-        log_error("Unable to add timeout for stopping log streaming");
-        _close_file();
-    }
-}
-
-void LogEndpoint::_close_file()
-{
     fsync(_file);
     close(_file);
     _file = -1;
@@ -369,23 +379,14 @@ void LogEndpoint::_close_file()
 
     // change file permissions to read-only to mark them as finished
     char log_file[PATH_MAX];
-    if (snprintf(log_file, sizeof(log_file), "%s/%s", _logs_dir, _filename) < (int)sizeof(log_file)) {
-        chmod(log_file, S_IRUSR|S_IRGRP|S_IROTH);
+    if (snprintf(log_file, sizeof(log_file), "%s/%s", _config.logs_dir.c_str(), _filename)
+        < (int)sizeof(log_file)) {
+        chmod(log_file, S_IRUSR | S_IRGRP | S_IROTH);
     }
-    // notify the system that we are standing by
-    _system_status = MAV_STATE_STANDBY;
-}
-
-void LogEndpoint::_start_heartbeat() {
-    _heartbeat_timer = Mainloop::get_instance().add_timeout(MSEC_PER_SEC, std::bind(&ULog::_broadcast_log_heartbeat, this), this);
 }
 
 bool LogEndpoint::start()
 {
-    if (_logging_stop_timeout) {
-        return false;
-    }
-
     if (_file != -1) {
         log_warning("Log already started");
         return false;
@@ -400,34 +401,32 @@ bool LogEndpoint::start()
         return false;
     }
 
-    _logging_start_timeout = Mainloop::get_instance().add_timeout(
-        MSEC_PER_SEC, std::bind(&LogEndpoint::_start_timeout, this), this);
-    if (!_logging_start_timeout) {
+    _timeout.logging_start = Mainloop::get_instance().add_timeout(
+        MSEC_PER_SEC,
+        std::bind(&LogEndpoint::_logging_start_timeout, this),
+        this);
+    if (!_timeout.logging_start) {
         log_error("Unable to add timeout");
-        goto timeout_error;
+        goto logging_timeout_error;
     }
 
-    // Call fsync twice per second
-    _fsync_timeout = Mainloop::get_instance().add_timeout(
-        MSEC_PER_SEC/2, std::bind(&LogEndpoint::_fsync, this), this);
-    if (!_fsync_timeout) {
+    // Call fsync once per second
+    _timeout.fsync = Mainloop::get_instance().add_timeout(MSEC_PER_SEC,
+                                                          std::bind(&LogEndpoint::_fsync, this),
+                                                          this);
+    if (!_timeout.fsync) {
         log_error("Unable to add timeout");
-        goto timeout_error;
+        goto fsync_timeout_error;
     }
-
-    // notify the system that we are active
-    _system_status = MAV_STATE_ACTIVE;
 
     log_info("Logging target system_id=%u on %s", _target_system_id, _filename);
 
     return true;
 
-timeout_error:
-    if (_logging_start_timeout) {
-        Mainloop::get_instance().del_timeout(_fsync_timeout);
-        _fsync_timeout = nullptr;
-    }
-
+fsync_timeout_error:
+    Mainloop::get_instance().del_timeout(_timeout.logging_start);
+    _timeout.logging_start = nullptr;
+logging_timeout_error:
     close(_file);
     _file = -1;
     return false;
@@ -463,44 +462,50 @@ bool LogEndpoint::_fsync()
     return true;
 }
 
-void LogEndpoint::_remove_start_timeout()
+void LogEndpoint::_remove_logging_start_timeout()
 {
-    Mainloop::get_instance().del_timeout(_logging_start_timeout);
-    _logging_start_timeout = nullptr;
-}
-
-void LogEndpoint::_remove_stop_timeout()
-{
-    Mainloop::get_instance().del_timeout(_logging_stop_timeout);
-    _logging_stop_timeout = nullptr;
+    Mainloop::get_instance().del_timeout(_timeout.logging_start);
+    _timeout.logging_start = nullptr;
 }
 
 bool LogEndpoint::_start_alive_timeout()
 {
-    _alive_check_timeout = Mainloop::get_instance().add_timeout(
-        MSEC_PER_SEC * ALIVE_TIMEOUT, std::bind(&LogEndpoint::_alive_timeout, this), this);
-    return !!_alive_check_timeout;
+    _timeout.alive
+        = Mainloop::get_instance().add_timeout(MSEC_PER_SEC * ALIVE_TIMEOUT,
+                                               std::bind(&LogEndpoint::_alive_timeout, this),
+                                               this);
+    return !!_timeout.alive;
 }
 
-void LogEndpoint::_handle_auto_start_stop(uint32_t msg_id, uint8_t source_system_id,
-        uint8_t source_component_id, uint8_t *payload)
+void LogEndpoint::_handle_auto_start_stop(const struct buffer *pbuf)
 {
-    if (_target_system_id == -1) { // wait until initialized
+    // wait until initialized
+    if (_target_system_id == -1) {
         return;
     }
-    if (_mode == LogMode::always) {
-        if (_file == -1) {
-            if (!start() && !_logging_stop_timeout) _mode = LogMode::disabled;
-        }
-    } else if (_mode == LogMode::while_armed) {
-        if (msg_id == MAVLINK_MSG_ID_HEARTBEAT && source_system_id == _target_system_id
-            && source_component_id == MAV_COMP_ID_AUTOPILOT1) {
 
-            const mavlink_heartbeat_t *heartbeat = (mavlink_heartbeat_t *)payload;
+    if (_config.log_mode == LogMode::always) {
+        if (_file == -1) {
+            if (!start()) {
+                _config.log_mode = LogMode::disabled;
+            }
+        }
+
+        return;
+    }
+
+    if (_config.log_mode == LogMode::while_armed) {
+        if (pbuf->curr.msg_id == MAVLINK_MSG_ID_HEARTBEAT
+            && pbuf->curr.src_sysid == _target_system_id
+            && pbuf->curr.src_compid == MAV_COMP_ID_AUTOPILOT1) {
+
+            const mavlink_heartbeat_t *heartbeat = (mavlink_heartbeat_t *)pbuf->curr.payload;
             const bool is_armed = heartbeat->base_mode & MAV_MODE_FLAG_SAFETY_ARMED;
 
-            if (_file == -1 && is_armed && !_logging_stop_timeout) {
-                if (!start()) _mode = LogMode::disabled;
+            if (_file == -1 && is_armed) {
+                if (!start()) {
+                    _config.log_mode = LogMode::disabled;
+                }
             } else if (_file != -1 && !is_armed) {
                 stop();
             }
@@ -508,6 +513,77 @@ void LogEndpoint::_handle_auto_start_stop(uint32_t msg_id, uint8_t source_system
     }
 }
 
-bool LogEndpoint::accept_msg(int target_sysid, int target_compid, uint8_t src_sysid, uint8_t src_compid, bool crc_valid, uint32_t msg_id){
-    return crc_valid ? Endpoint::accept_msg(target_sysid, target_compid, src_sysid, src_compid, crc_valid, msg_id) : false;
+int LogEndpoint::parse_mavlink_dialect(const char *val, size_t val_len, void *storage,
+                                       size_t storage_len)
+{
+    assert(val);
+    assert(storage);
+    assert(val_len);
+
+    auto *dialect = (LogOptions::MavDialect *)storage;
+
+    if (storage_len < sizeof(LogOptions::mavlink_dialect)) {
+        return -ENOBUFS;
+    }
+    if (val_len > INT_MAX) {
+        return -EINVAL;
+    }
+
+    if (memcaseeq(val, val_len, "auto", sizeof("auto") - 1)) {
+        *dialect = LogOptions::MavDialect::Auto;
+    } else if (memcaseeq(val, val_len, "common", sizeof("common") - 1)) {
+        *dialect = LogOptions::MavDialect::Common;
+    } else if (memcaseeq(val, val_len, "ardupilotmega", sizeof("ardupilotmega") - 1)) {
+        *dialect = LogOptions::MavDialect::Ardupilotmega;
+    } else {
+        log_error("Invalid argument for MavlinkDialect = %.*s", (int)val_len, val);
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+#define MAX_LOG_MODE_SIZE 20
+int LogEndpoint::parse_log_mode(const char *val, size_t val_len, void *storage, size_t storage_len)
+{
+    assert(val);
+    assert(storage);
+    assert(val_len);
+
+    if (storage_len < sizeof(LogOptions::log_mode)) {
+        return -ENOBUFS;
+    }
+    if (val_len > MAX_LOG_MODE_SIZE) {
+        return -EINVAL;
+    }
+
+    const char *log_mode_str = strndupa(val, val_len);
+    LogMode log_mode;
+    if (strcaseeq(log_mode_str, "always")) {
+        log_mode = LogMode::always;
+    } else if (strcaseeq(log_mode_str, "while-armed")) {
+        log_mode = LogMode::while_armed;
+    } else {
+        log_error("Invalid argument for LogMode = %s", log_mode_str);
+        return -EINVAL;
+    }
+    *((LogMode *)storage) = log_mode;
+
+    return 0;
+}
+#undef MAX_LOG_MODE_SIZE
+
+int LogEndpoint::parse_fcu_id(const char *val, size_t val_len, void *storage, size_t storage_len)
+{
+    const int i_ret = ConfFile::parse_i(val, val_len, storage, storage_len);
+    if (i_ret != 0) {
+        return i_ret;
+    }
+
+    if (*(int *)storage > 255 || *(int *)storage <= 0) {
+        log_error("Invalid argument for FcuId = %.*s, should be in [0, 255]", (int)val_len, val);
+        return -EINVAL;
+    }
+
+    return 0;
 }
