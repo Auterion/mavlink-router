@@ -17,11 +17,13 @@
  */
 #include "mainloop.h"
 
+#include <chrono>
 #include <assert.h>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+#include <systemd/sd-daemon.h>
 
 #include <atomic>
 #include <memory>
@@ -244,6 +246,10 @@ accept_error:
 
 int Mainloop::loop()
 {
+    sd_notify(0, "READY=1");
+    const int watchdog_interval_us = _watchdogIntervalUs();
+    auto last_watchdog_update = std::chrono::steady_clock::now();
+
     const int max_events = 8;
     struct epoll_event events[max_events];
     int r;
@@ -260,6 +266,16 @@ int Mainloop::loop()
 
     while (!should_exit.load(std::memory_order_relaxed)) {
         int i;
+
+        // Watchdog update
+        if (watchdog_interval_us > 0) {
+            const auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::microseconds>(now - last_watchdog_update)
+                    .count() > watchdog_interval_us) {
+                last_watchdog_update = now;
+                sd_notify(0, "WATCHDOG=1");
+            }
+        }
 
         r = epoll_wait(epollfd, events, max_events, -1);
         if (r < 0 && errno == EINTR) {
@@ -323,6 +339,16 @@ int Mainloop::loop()
 
     return _retcode;
 }
+
+int Mainloop::_watchdogIntervalUs()
+{
+  const char* watchdog_usec_env = getenv("WATCHDOG_USEC");
+  if (watchdog_usec_env) {
+    return atoi(watchdog_usec_env) / 2;
+  }
+  return 0;
+}
+
 
 bool Mainloop::_log_aggregate_timeout(void *data)
 {

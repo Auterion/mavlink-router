@@ -59,6 +59,7 @@ public:
     int loop();
     void route_msg(struct buffer *buf);
     void handle_tcp_connection();
+    static int _watchdogIntervalUs();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const;
     void process_tcp_hangups();
     Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
