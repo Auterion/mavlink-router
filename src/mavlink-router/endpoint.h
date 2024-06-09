@@ -23,6 +23,8 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <mutex>
+#include <map>
 
 #include "comm.h"
 #include "pollable.h"
@@ -92,6 +94,11 @@ public:
 
     uint8_t get_trimmed_zeros(const mavlink_msg_entry_t *msg_entry, const struct buffer *buffer);
 
+    bool group_has_sys_comp_id(unsigned sys_comp_id);
+    bool group_has_sys_comp_id(unsigned sysid, unsigned compid) {
+        uint16_t sys_comp_id = ((sysid & 0xff) << 8) | (compid & 0xff);
+        return group_has_sys_comp_id(sys_comp_id);
+    }
     bool has_sys_id(unsigned sysid);
     bool has_sys_comp_id(unsigned sys_comp_id);
     bool has_sys_comp_id(unsigned sysid, unsigned compid) {
@@ -103,6 +110,7 @@ public:
     void postprocess_msg(int target_sysid, int target_compid, uint8_t src_sysid, uint8_t src_compid, uint32_t msg_id);
 
     bool allowed_by_filter(uint32_t msg_id);
+    bool add_group(uint32_t group_id);
     void add_message_to_filter(uint32_t msg_id) { _message_filter.push_back(msg_id); }
     void add_message_to_nodelay(uint32_t msg_id) { _message_nodelay.push_back(msg_id); }
     bool allowed_by_dropout();
@@ -163,10 +171,13 @@ protected:
 
     uint32_t _incomplete_msgs = 0;
     std::vector<uint16_t> _sys_comp_ids;
+    inline static std::mutex _group_sys_comp_ids_mutex;
+    inline static std::map<uint32_t, std::vector<uint16_t>> _group_sys_comp_ids;
 
 private:
     Timeout* _expire_timer = nullptr;
     std::vector<uint32_t> _message_filter;
+    std::vector<uint32_t> _groups;
     std::vector<uint32_t> _message_nodelay;
     MessageLog _message_log;
 };

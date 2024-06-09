@@ -753,12 +753,14 @@ static int parse_confs(ConfFile &conf)
         unsigned long coalesce_ms;
         char *coalesce_nodelay;
         unsigned long dropout_percentage;
+        int group_number;
     };
     static const ConfFile::OptionsTable option_table_udp[] = {
         {"address",         true,   ConfFile::parse_str_dup,    OPTIONS_TABLE_STRUCT_FIELD(option_udp, addr)},
         {"mode",            true,   parse_mode,                 OPTIONS_TABLE_STRUCT_FIELD(option_udp, eavesdropping)},
         {"port",            false,  ConfFile::parse_ul,         OPTIONS_TABLE_STRUCT_FIELD(option_udp, port)},
         {"filter",          false,  ConfFile::parse_str_dup,    OPTIONS_TABLE_STRUCT_FIELD(option_udp, filter)},
+        {"group",           false,  ConfFile::parse_i,          OPTIONS_TABLE_STRUCT_FIELD(option_udp, group_number)},
         {"CoalesceBytes",   false,  ConfFile::parse_ul,         OPTIONS_TABLE_STRUCT_FIELD(option_udp, coalesce_bytes)},
         {"CoalesceMs",      false,  ConfFile::parse_ul,         OPTIONS_TABLE_STRUCT_FIELD(option_udp, coalesce_ms)},
         {"CoalesceNoDelay", false,  ConfFile::parse_str_dup,    OPTIONS_TABLE_STRUCT_FIELD(option_udp, coalesce_nodelay)},
@@ -800,7 +802,7 @@ static int parse_confs(ConfFile &conf)
     pattern = "udpendpoint *";
     offset = strlen(pattern) - 1;
     while (conf.get_sections(pattern, &iter) == 0) {
-        struct option_udp opt_udp = {nullptr, false, ULONG_MAX, nullptr, 0, 0, nullptr};
+        struct option_udp opt_udp = {nullptr, false, ULONG_MAX, nullptr, 0, 0, nullptr, (long unsigned int) -1};
         ret = conf.extract_options(&iter, option_table_udp, ARRAY_SIZE(option_table_udp), &opt_udp);
         if (ret == 0) {
             if (opt_udp.eavesdropping && opt_udp.port == ULONG_MAX) {

@@ -307,10 +307,17 @@ int Endpoint::read_msg(struct buffer *pbuf, int *target_sysid, int *target_compi
 
 void Endpoint::_add_sys_comp_id(uint16_t sys_comp_id)
 {
-    if (has_sys_comp_id(sys_comp_id))
+    if (has_sys_comp_id(sys_comp_id)) {
         return;
+    }
 
     _sys_comp_ids.push_back(sys_comp_id);
+    
+    if (_groups.size()) {
+        for (const auto& group : _groups) {
+            _group_sys_comp_ids[group].push_back(sys_comp_id);
+        }
+    }
 }
 
 bool Endpoint::has_sys_id(unsigned sysid)
@@ -381,6 +388,25 @@ bool Endpoint::allowed_by_filter(uint32_t msg_id)
         return false;
     }
     return true;
+}
+
+bool Endpoint::add_group(uint32_t group) {
+    std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
+    return _group_sys_comp_ids.emplace(group, std::vector<uint16_t>()).second;
+}
+
+bool Endpoint::group_has_sys_comp_id(unsigned int compid) {
+    std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
+    for (const auto& entry : _groups) {
+        auto it = _group_sys_comp_ids.find(entry);
+        if (it != _group_sys_comp_ids.end()) {
+            const std::vector<uint16_t>& comp_ids = it->second;
+            if (std::find(comp_ids.begin(), comp_ids.end(), compid) != comp_ids.end()) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 bool Endpoint::allowed_by_dropout()
