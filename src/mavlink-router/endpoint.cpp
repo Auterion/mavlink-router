@@ -323,6 +323,7 @@ void Endpoint::_add_sys_comp_id(uint16_t sys_comp_id)
         for (const auto& group : _groups) {
             // has_sys_comp_id above should prevent duplicates from
             // entering the group sys_comp_ids vector
+            log_debug("Adding sys_comp_id %u to group %u", sys_comp_id, group);
             _group_sys_comp_ids[group].push_back(sys_comp_id);
         }
     }
@@ -403,6 +404,7 @@ bool Endpoint::allowed_by_filter(uint32_t msg_id)
 
 bool Endpoint::add_group(uint32_t group) {
     std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
+    log_debug("Adding endpoint: %s to group %u", _name.c_str(), group);
     return _group_sys_comp_ids.emplace(group, std::vector<uint16_t>()).second;
 }
 
@@ -412,8 +414,8 @@ bool Endpoint::group_has_sys_id(unsigned sysid) {
         auto it = _group_sys_comp_ids.find(entry);
         if (it != _group_sys_comp_ids.end()) {
             const std::vector<uint16_t>& comp_ids = it->second;
-            for (const auto &entry : comp_ids) {
-                if (((entry >> 8) | (sysid & 0xff)) == sysid) {
+            for (const auto &val : comp_ids) {
+                if (((val >> 8) | (sysid & 0xff)) == sysid) {
                     return true; 
                 }
             }
