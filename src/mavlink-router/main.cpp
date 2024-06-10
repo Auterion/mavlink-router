@@ -240,7 +240,7 @@ fail:
 static int add_udp_endpoint_address(const char *name, size_t name_len, const char *ip,
                                     long unsigned port, bool eavesdropping, const char *filter,
                                     int coalesce_bytes, int coalesce_ms, const char *coalesce_nodelay,
-                                    uint32_t dropout_percentage)
+                                    uint32_t dropout_percentage, const int16_t group_number)
 {
     int ret;
 
@@ -285,6 +285,7 @@ static int add_udp_endpoint_address(const char *name, size_t name_len, const cha
     conf->eavesdropping = eavesdropping;
     conf->coalesce_bytes = coalesce_bytes;
     conf->coalesce_ms = coalesce_ms;
+    conf->group_number = group_number;
 
     if (coalesce_nodelay) {
         conf->coalesce_nodelay = strdup(coalesce_nodelay);
@@ -459,7 +460,7 @@ static int parse_argv(int argc, char *argv[])
                 return -EINVAL;
             }
 
-            add_udp_endpoint_address(NULL, 0, ip, port, false, NULL, 0, 0, NULL, 0);
+            add_udp_endpoint_address(NULL, 0, ip, port, false, NULL, 0, 0, NULL, 0, -1);
             free(ip);
             break;
         }
@@ -560,7 +561,7 @@ static int parse_argv(int argc, char *argv[])
                 return -EINVAL;
             }
 
-            add_udp_endpoint_address(NULL, 0, base, number, true, NULL, 0, 0, NULL, 0);
+            add_udp_endpoint_address(NULL, 0, base, number, true, NULL, 0, 0, NULL, 0, -1);
         } else {
             const char *bauds = number != ULONG_MAX ? base + strlen(base) + 1 : NULL;
             int ret = add_uart_endpoint(NULL, 0, base, bauds, false, 0);
@@ -815,7 +816,8 @@ static int parse_confs(ConfFile &conf)
                 } else {
                     ret = add_udp_endpoint_address(iter.name + offset, iter.name_len - offset, opt_udp.addr,
                                                    opt_udp.port, opt_udp.eavesdropping, opt_udp.filter, opt_udp.coalesce_bytes,
-                                                   opt_udp.coalesce_ms, opt_udp.coalesce_nodelay, opt_udp.dropout_percentage);
+                                                   opt_udp.coalesce_ms, opt_udp.coalesce_nodelay, opt_udp.dropout_percentage,
+                                                   opt_udp.group_number);
                 }
             }
         }

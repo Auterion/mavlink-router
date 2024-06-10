@@ -605,6 +605,10 @@ bool Mainloop::add_endpoints(Mainloop &mainloop, struct options *opt)
                 udp->set_dropout_percentage(conf->dropout_percentage);
             }
 
+            if (conf->group_number >= 0) {
+                udp->add_group(conf->group_number);
+            }
+
             mainloop.add_fd(udp->fd, udp.get(), EPOLLIN);
             _endpoints.push_back(std::move(udp));
             break;
