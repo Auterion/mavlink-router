@@ -402,11 +402,12 @@ bool Endpoint::allowed_by_filter(uint32_t msg_id)
     return true;
 }
 
-bool Endpoint::add_group(uint32_t group) {
+bool Endpoint::add_group(uint16_t group) {
     std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
     log_debug("Attempting to add endpoint: %s to group %u", _name.c_str(), group);
     if (_group_sys_comp_ids.find(group) == _group_sys_comp_ids.end()) {
         log_debug("Creating group %u", _name.c_str(), group);
+        _groups.push_back(group);
         return _group_sys_comp_ids.emplace(group, std::vector<uint16_t>()).second;
     }
     return false;
@@ -435,6 +436,7 @@ bool Endpoint::group_has_sys_comp_id(unsigned int compid) {
         if (it != _group_sys_comp_ids.end()) {
             const std::vector<uint16_t>& comp_ids = it->second;
             if (std::find(comp_ids.begin(), comp_ids.end(), compid) != comp_ids.end()) {
+                log_info("Found %u in group %u", compid, entry);
                 return true;
             }
         }
