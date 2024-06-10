@@ -94,6 +94,7 @@ public:
 
     uint8_t get_trimmed_zeros(const mavlink_msg_entry_t *msg_entry, const struct buffer *buffer);
 
+    bool group_has_sys_id(unsigned sysid);
     bool group_has_sys_comp_id(unsigned sys_comp_id);
     bool group_has_sys_comp_id(unsigned sysid, unsigned compid) {
         uint16_t sys_comp_id = ((sysid & 0xff) << 8) | (compid & 0xff);

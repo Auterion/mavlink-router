@@ -47,6 +47,7 @@
 
 #define UART_BAUD_RETRY_SEC 5
 
+// Static vars protected by a mutex, shared across all instances of Endpoint
 std::mutex Endpoint::_group_sys_comp_ids_mutex;
 std::map<uint32_t, std::vector<uint16_t>> Endpoint::_group_sys_comp_ids = {};
 
@@ -316,8 +317,12 @@ void Endpoint::_add_sys_comp_id(uint16_t sys_comp_id)
 
     _sys_comp_ids.push_back(sys_comp_id);
     
+    // If this endpint is in a group, add the sys_comp_id to it.
     if (_groups.size()) {
+        std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
         for (const auto& group : _groups) {
+            // has_sys_comp_id above should prevent duplicates from
+            // entering the group sys_comp_ids vector
             _group_sys_comp_ids[group].push_back(sys_comp_id);
         }
     }
@@ -370,11 +375,14 @@ bool Endpoint::accept_msg(int target_sysid, int target_compid, uint8_t src_sysid
         return true;
 
     // This endpoint has the target of message (sys and comp id): accept
-    if (target_compid > 0 && has_sys_comp_id(target_sysid, target_compid))
+    if (target_compid > 0 &&
+        (has_sys_comp_id(target_sysid, target_compid) ||
+         group_has_sys_comp_id(target_sysid, target_compid)))
         return true;
 
     // This endpoint has the target of message (sysid, but compid is broadcast or non-existent): accept
-    if ((target_compid == 0 || target_compid == -1) && has_sys_id(target_sysid))
+    if ((target_compid == 0 || target_compid == -1) &&
+        (has_sys_id(target_sysid) || group_has_sys_id(target_sysid)))
         return true;
 
     // Reject everything else
@@ -396,6 +404,22 @@ bool Endpoint::allowed_by_filter(uint32_t msg_id)
 bool Endpoint::add_group(uint32_t group) {
     std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
     return _group_sys_comp_ids.emplace(group, std::vector<uint16_t>()).second;
+}
+
+bool Endpoint::group_has_sys_id(unsigned sysid) {
+    std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
+    for (const auto& entry : _groups) {
+        auto it = _group_sys_comp_ids.find(entry);
+        if (it != _group_sys_comp_ids.end()) {
+            const std::vector<uint16_t>& comp_ids = it->second;
+            for (const auto &entry : comp_ids) {
+                if (((entry >> 8) | (sysid & 0xff)) == sysid) {
+                    return true; 
+                }
+            }
+        }
+    }
+    return false;
 }
 
 bool Endpoint::group_has_sys_comp_id(unsigned int compid) {
