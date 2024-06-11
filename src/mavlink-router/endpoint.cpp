@@ -404,10 +404,10 @@ bool Endpoint::allowed_by_filter(uint32_t msg_id)
 
 bool Endpoint::add_group(uint16_t group) {
     std::lock_guard<std::mutex> lock(_group_sys_comp_ids_mutex);
+    _groups.push_back(group);
     log_debug("Attempting to add endpoint: %s to group %u", _name.c_str(), group);
     if (_group_sys_comp_ids.find(group) == _group_sys_comp_ids.end()) {
-        log_debug("Creating group %u", _name.c_str(), group);
-        _groups.push_back(group);
+        log_debug("Creating group %u", group);
         return _group_sys_comp_ids.emplace(group, std::vector<uint16_t>()).second;
     }
     return false;
