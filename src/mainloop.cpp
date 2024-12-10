@@ -307,10 +307,23 @@ void Mainloop::handle_command_pipe()
 
                 // Command to UDP endpoint configuration
                 UdpEndpointConfig conf{};
-                conf.mode = mode;
                 conf.name = a[2];
                 conf.address = a[3];
                 conf.port = port;
+
+                // UDP endpoint mode
+                if(a[5] == "server" ||  a[5] == "Server") {
+                    conf.mode = UdpEndpointConfig::Mode::Server;
+                }
+                else if (a[5] == "eavesdropping" ||  a[5] == "Eavesdropping") {
+                    conf.mode = UdpEndpointConfig::Mode::Server;
+                }
+                else if (a[5] == "client" ||  a[5] == "Client") {
+                    conf.mode = UdpEndpointConfig::Mode::Client;
+                }
+                else {
+                    conf.mode = UdpEndpointConfig::Mode::Client;
+                }
 
                 if (a.size() > 6) { // group name provided
                     conf.group = a[6] == "NULL" ? "" : a[6];
