@@ -25,6 +25,9 @@
 #include <utility>
 #include <vector>
 #include <set>
+#include <unordered_map>
+#include <chrono>
+#include <cfloat>
 
 #include "comm.h"
 #include "pollable.h"
@@ -55,6 +58,7 @@ struct UartEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    std::vector<std::pair<float,float>> message_throttling;
 };
 
 struct UdpEndpointConfig {
@@ -80,6 +84,7 @@ struct UdpEndpointConfig {
     unsigned long coalesce_bytes;
     unsigned long coalesce_ms;
     std::vector<uint32_t> coalesce_nodelay;
+    std::vector<std::pair<float,float>> message_throttling;
 };
 
 struct TcpEndpointConfig {
@@ -103,6 +108,7 @@ struct TcpEndpointConfig {
     unsigned long coalesce_bytes;
     unsigned long coalesce_ms;
     std::vector<uint32_t> coalesce_nodelay;
+    std::vector<std::pair<float,float>> message_throttling;
 };
 
 /*
@@ -186,6 +192,8 @@ public:
 
     AcceptState accept_msg(const struct buffer *pbuf) const;
 
+    bool should_throttle_msg(const struct buffer *pbuf);
+
     void filter_add_allowed_out_msg_id(uint32_t msg_id)
     {
         _allowed_outgoing_msg_ids.push_back(msg_id);
@@ -233,6 +241,15 @@ public:
     void filter_add_blocked_in_src_sys(uint8_t src_sys)
     {
         _blocked_incoming_src_systems.push_back(src_sys);
+    }
+
+    void set_message_throttling(uint32_t msg_id, float rate)
+    {
+        if (rate > FLT_EPSILON) {    // add the msg_id to the throttle map
+            _message_throttle_map[msg_id].rate = rate;
+        } else {    // un-throttle by removing the entry from the map
+            _message_throttle_map.erase(msg_id);
+        }
     }
 
     bool allowed_by_dedup(const buffer *pbuf) const;
@@ -298,6 +315,12 @@ private:
     std::vector<uint8_t> _blocked_incoming_src_comps;
     std::vector<uint8_t> _allowed_incoming_src_systems;
     std::vector<uint8_t> _blocked_incoming_src_systems;
+
+    typedef struct {
+        float rate;
+        std::chrono::steady_clock::time_point next_timestamp = std::chrono::steady_clock::now();
+    } throttle_info;
+    std::unordered_map<uint32_t, throttle_info> _message_throttle_map; 
 };
 
 class UartEndpoint : public Endpoint {

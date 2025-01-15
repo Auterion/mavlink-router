@@ -167,15 +167,26 @@ void Mainloop::route_msg(struct buffer *buf)
 
         switch (acceptState) {
         case Endpoint::AcceptState::Accepted:
-            log_trace("Endpoint [%d] accepted message %u to %d/%d from %u/%u",
+            // Check if the message has to be throttled
+            if (e->should_throttle_msg(buf)){
+                log_trace("Endpoint [%d] discarded message %u to %d/%d from %u/%u for throttling reasons",
+                          e->fd,
+                          buf->curr.msg_id,
+                          buf->curr.target_sysid,
+                          buf->curr.target_compid,
+                          buf->curr.src_sysid,
+                          buf->curr.src_compid);
+            } else {
+                log_trace("Endpoint [%d] accepted message %u to %d/%d from %u/%u",
                       e->fd,
                       buf->curr.msg_id,
                       buf->curr.target_sysid,
                       buf->curr.target_compid,
                       buf->curr.src_sysid,
                       buf->curr.src_compid);
-            if (write_msg(e, buf) == -EPIPE) { // only TCP endpoints should return -EPIPE
-                should_process_tcp_hangups = true;
+                if (write_msg(e, buf) == -EPIPE) { // only TCP endpoints should return -EPIPE
+                    should_process_tcp_hangups = true;
+                }
             }
             unknown = false;
             break;
@@ -398,6 +409,26 @@ void Mainloop::handle_command_pipe()
                     // Remove from endpoint list
                     g_endpoints.erase(to_delete);
                     log_info("Removed endpoint %s", a[1].c_str());
+                }
+            } else if (a[0] == "throttle") {
+                // Throttle command
+                // throttle Name msg_id rate  
+                //    a0     a1    a2    a3
+
+                // Sanity checks
+                if (a.size() != 4) {
+                    log_error("Command Server: throttle command usage: \n\tthrottle <endpoint_name> <msg_id> <rate>");
+                    continue;
+                }
+
+                auto to_update = std::find_if(g_endpoints.begin(), g_endpoints.end(), 
+                    [&a](const std::shared_ptr<Endpoint> e) {return e->get_name() == a[1];});
+
+                if (to_update == g_endpoints.end()) {
+                    log_error("No endpoint named %s", a[1].c_str());
+                } else {
+                    to_update->get()->set_message_throttling(atol(a[2].c_str()), atof(a[3].c_str()));
+                    log_info("Endpoint %s: updated message %s rate to %sHz", a[1].c_str(), a[2].c_str(), a[3].c_str());
                 }
 
             } else {
