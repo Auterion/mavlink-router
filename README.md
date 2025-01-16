@@ -274,6 +274,14 @@ Message coalescing:
     specified. When one of these messages is received, it is added to the UDP
     packet being constructed and sent immediately.
 
+Message throttling:
+  
+  - Some endpoints may require receiving messages at lower rates than the source 
+    sending them (e.g., they are connected over a low-bandwidth link). 
+    The router is capable of throttling specific messages at user defined rates. 
+    To do this, it is sufficient to specify in the config file the list of
+    `<msg_id>,<rate>` pairs under the desired endpoints settings.
+
 Endpoint groups:
 
   - Multiple endpoints can be configured to be in the same endpoin group.
