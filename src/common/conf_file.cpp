@@ -563,6 +563,37 @@ int ConfFile::parse_uint32_vector(const char *val, size_t val_len, void *storage
     return 0;
 }
 
+int ConfFile::parse_pair_vector(const char *val, size_t val_len, void *storage, size_t storage_len)
+{
+    assert(val);
+    assert(storage);
+    assert(val_len);
+
+    std::vector<std::pair<float, float>> *target;
+    if (storage_len < sizeof(*target)) {
+        return -ENOBUFS;
+    }
+
+    char *filter_string = strndupa(val, val_len);
+    target = static_cast<std::vector<std::pair<float, float>> *>(storage);
+    char *token_saveptr, *value_saveptr;
+
+    char *token = strtok_r(filter_string, ";", &token_saveptr);
+    while (token != nullptr) {
+        float first = atof(strtok_r(token, ",", &value_saveptr));
+        char *second_charp = strtok_r(nullptr, ",", &value_saveptr);
+        if (second_charp == nullptr)
+            return -1;
+        float second = atof(second_charp);
+
+        target->push_back(std::pair<float, float>{first, second});
+
+        token = strtok_r(nullptr, ";", &token_saveptr);
+    }
+
+    return 0;
+}
+
 int ConfFile::parse_bool(const char *val, size_t val_len, void *storage, size_t storage_len)
 {
     int ival, ret;

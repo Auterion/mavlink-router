@@ -74,6 +74,7 @@ const ConfFile::OptionsTable UartEndpoint::option_table[] = {
     {"AllowSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, allow_src_sys_in)},
     {"BlockSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, block_src_sys_in)},
     {"group",           false, ConfFile::parse_stdstring,       OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, group)},
+    {"MsgThrottling",   false, ConfFile::parse_pair_vector,     OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, message_throttling)},
     {}
 };
 
@@ -99,6 +100,7 @@ const ConfFile::OptionsTable UdpEndpoint::option_table[] = {
     {"CoalesceBytes",   false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_bytes)},
     {"CoalesceMs",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_ms)},
     {"CoalesceNoDelay", false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_nodelay)},
+    {"MsgThrottling",   false,  ConfFile::parse_pair_vector,    OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, message_throttling)},
     {}
 };
 
@@ -123,6 +125,7 @@ const ConfFile::OptionsTable TcpEndpoint::option_table[] = {
     {"CoalesceBytes",   false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, coalesce_bytes)},
     {"CoalesceMs",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, coalesce_ms)},
     {"CoalesceNoDelay", false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, coalesce_nodelay)},
+    {"MsgThrottling",   false,  ConfFile::parse_pair_vector,    OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, message_throttling)},
     {}
 };
 // clang-format on
@@ -592,6 +595,38 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
     return Endpoint::AcceptState::Rejected;
 }
 
+bool Endpoint::should_throttle_msg(const struct buffer *pbuf)
+{
+    // Check if message throttling is set for such message id
+    if (pbuf->curr.msg_id != UINT32_MAX && !_message_throttle_map.empty()
+        && _message_throttle_map.count(pbuf->curr.msg_id)) {
+
+        throttle_info &thr_info = _message_throttle_map.at(pbuf->curr.msg_id);
+        if (thr_info.rate < FLT_EPSILON)
+            return false; // invalid rate
+
+        const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        const auto period = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::duration<float>(1.f / thr_info.rate));
+
+        if (now < thr_info.next_timestamp) {
+            // Throttle message
+            return true;
+        } else {
+            // Do not throttle message (return false)
+
+            // We haven't received any new message in a while: reset next timestamp
+            if (now > thr_info.next_timestamp + 2 * period) {
+                thr_info.next_timestamp = now;
+            }
+
+            // Compute next timestamp
+            thr_info.next_timestamp += period;
+        }
+    }
+    return false;
+}
+
 bool Endpoint::allowed_by_dedup(const buffer *buf) const
 {
     return Mainloop::get_instance().dedup_check_msg(buf);
@@ -808,6 +843,16 @@ bool UartEndpoint::setup(UartEndpointConfig conf)
     }
 
     this->_group_name = conf.group;
+
+    // Message throttling config
+    for (auto throttle_cfg : conf.message_throttling) {
+        if (throttle_cfg.first > UINT32_MAX) {
+            return false;
+        }
+
+        uint32_t msg_id = static_cast<uint32_t>(throttle_cfg.first);
+        this->set_message_throttling(msg_id, throttle_cfg.second);
+    }
 
     return true;
 }
@@ -1160,6 +1205,16 @@ bool UdpEndpoint::setup(UdpEndpointConfig conf)
     this->_coalesce_ms = conf.coalesce_ms;
     for (auto msg_id : conf.coalesce_nodelay) {
         this->add_no_coalesce_msg_id(msg_id);
+    }
+
+    // Message throttling config
+    for (auto throttle_cfg : conf.message_throttling) {
+        if (throttle_cfg.first > UINT32_MAX) {
+            return false;
+        }
+
+        uint32_t msg_id = static_cast<uint32_t>(throttle_cfg.first);
+        this->set_message_throttling(msg_id, throttle_cfg.second);
     }
 
     return true;
@@ -1606,6 +1661,16 @@ bool TcpEndpoint::setup(TcpEndpointConfig conf)
     this->_coalesce_ms = conf.coalesce_ms;
     for (auto msg_id : conf.coalesce_nodelay) {
         this->add_no_coalesce_msg_id(msg_id);
+    }
+
+    // Message throttling config
+    for (auto throttle_cfg : conf.message_throttling) {
+        if (throttle_cfg.first > UINT32_MAX) {
+            return false;
+        }
+
+        uint32_t msg_id = static_cast<uint32_t>(throttle_cfg.first);
+        this->set_message_throttling(msg_id, throttle_cfg.second);
     }
 
     if (!this->open(conf.address, conf.port)) {

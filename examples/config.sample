@@ -218,6 +218,12 @@
 # Default: Empty (no high priority messages)
 # CoalesceNoDelay = 
 
+# List of messages to be throttled to a specified rate (in Hz).
+# Format: Semicolon-separated list of pairs, where each pair consists
+# of an integer and a float, separated by a comma: <msg_id>,<target_rate>
+# Default: Empty (no message throttling)
+#MsgThrottling =
+
 ## Example
 [UartEndpoint alpha]
 Device = /dev/ttyS0
