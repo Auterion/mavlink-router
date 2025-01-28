@@ -55,6 +55,9 @@ struct UartEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    unsigned long coalesce_bytes;
+    unsigned long coalesce_ms;
+    std::vector<uint32_t> coalesce_nodelay;
 };
 
 struct UdpEndpointConfig {
@@ -303,16 +306,21 @@ private:
 class UartEndpoint : public Endpoint {
 public:
     UartEndpoint(std::string name);
-    ~UartEndpoint() override = default;
+    ~UartEndpoint() override;
 
     int write_msg(const struct buffer *pbuf) override;
-    int flush_pending_msgs() override { return -ENOSYS; }
+    int flush_pending_msgs() override;
 
     bool setup(UartEndpointConfig config); ///< open UART device and apply config
 
     static const ConfFile::OptionsTable option_table[];
     static const char *section_pattern;
     static bool validate_config(const UartEndpointConfig &config);
+
+    void add_no_coalesce_msg_id(uint32_t msg_id)
+    {
+        _coalesce_nodelay.insert(msg_id);
+    }
 
 protected:
     bool open(const char *path);
@@ -323,12 +331,20 @@ protected:
     int read_msg(struct buffer *pbuf) override;
     ssize_t _read_msg(uint8_t *buf, size_t len) override;
 
+    void _schedule_write();
+    bool _write_scheduled = false;
+    Timeout *_write_schedule_timer = nullptr;
+    unsigned int _coalesce_bytes = 0UL;     // max coalescence size
+    unsigned long _coalesce_ms = 0UL;       // max time to hold data to try to coalesce packets together
+
+
 private:
     size_t _current_baud_idx = 0;
     Timeout *_change_baud_timeout = nullptr;
     std::vector<uint32_t> _baudrates;
 
     bool _change_baud_cb(void *data);
+    std::set<uint32_t> _coalesce_nodelay{}; // immediately send if a mavlink msg_id is in this set
 };
 
 class UdpEndpoint : public Endpoint {
