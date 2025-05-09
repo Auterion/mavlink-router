@@ -767,8 +767,10 @@ ssize_t UartEndpoint::_read_msg(uint8_t *buf, size_t len)
     ssize_t r = ::read(fd, buf, len);
     if ((r == -1 && errno == EAGAIN) || r == 0)
         return 0;
-    if (r == -1)
+    if (r == -1) {
+        log_error("UART [%d], error reading from uart", fd);
         return -errno;
+    }
 
     return r;
 }
@@ -786,8 +788,12 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     ssize_t r = ::write(fd, pbuf->data, pbuf->len);
-    if (r == -1 && errno == EAGAIN)
-        return -EAGAIN;
+
+    if (r == -1) {
+        if (errno != EAGAIN)
+            log_error("UART [%d], error writing to uart", fd);
+        return -errno;
+    }
 
     _stat.write.total++;
     _stat.write.bytes += pbuf->len;
@@ -981,6 +987,8 @@ ssize_t UdpEndpoint::_read_msg(uint8_t *buf, size_t len)
     if (r == -1 && errno == EAGAIN)
         return 0;
     if (r == -1)
+        if (errno != EAGAIN)
+            log_error("UDP [%d] error receiving udp packet (%m)", fd);
         return -errno;
 
     /* Store the sender */
@@ -1080,7 +1088,7 @@ int UdpEndpoint::flush_pending_msgs()
 
     if (r == -1) {
         if (errno != EAGAIN && errno != ECONNREFUSED && errno != ENETUNREACH)
-            log_error("Error sending udp packet (%m)");
+            log_error("UDP [%d] error sending udp packet (%m)", fd);
         return -errno;
     };
 
@@ -1259,8 +1267,10 @@ ssize_t TcpEndpoint::_read_msg(uint8_t *buf, size_t len)
 
     if (r == -1 && errno == EAGAIN)
         return 0;
-    if (r == -1)
+    if (r == -1) {
+        log_error("TCP [%d] error receiving tcp packet (%m)", fd);
         return -errno;
+    }
 
     // a read of zero on a stream socket means that other side shut down
     if (r == 0 && len != 0) {
@@ -1296,7 +1306,7 @@ int TcpEndpoint::write_msg(const struct buffer *pbuf)
 
     if (r == -1) {
         if (errno != EAGAIN && errno != ECONNREFUSED)
-            log_error("Error sending tcp packet (%m)");
+            log_error("TCP [%d] error sending tcp packet (%m)", fd);
         if (errno == EPIPE)
             _valid = false;
         return -errno;
