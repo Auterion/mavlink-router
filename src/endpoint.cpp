@@ -1028,6 +1028,10 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
     if (r == -1) {
         if (errno != EAGAIN) {
             log_error("UART %s: Error writing to uart (%m)", _name.c_str());
+        } else {
+            int pending;
+            ioctl(fd, TIOCOUTQ, &pending);
+            log_debug("UART %s: Remaining in TX buffer: %d", _name.c_str(), pending);
         }
         return -errno;
     }
@@ -1044,7 +1048,11 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
                   pbuf->len);
     }
 
-    log_trace("UART [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    if (_name == "FlightController") {
+        log_debug("UART [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    } else {
+        log_trace("UART [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    }
 
     return r;
 }

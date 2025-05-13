@@ -167,38 +167,67 @@ void Mainloop::route_msg(struct buffer *buf)
 
         switch (acceptState) {
         case Endpoint::AcceptState::Accepted:
-            log_trace("Endpoint [%d] accepted message %u to %d/%d from %u/%u",
-                      e->fd,
-                      buf->curr.msg_id,
-                      buf->curr.target_sysid,
-                      buf->curr.target_compid,
-                      buf->curr.src_sysid,
-                      buf->curr.src_compid);
+            if (e->get_name() == "FlightController") {
+                log_debug("Endpoint [%d] accepted message %u to %d/%d from %u/%u",
+                          e->fd,
+                          buf->curr.msg_id,
+                          buf->curr.target_sysid,
+                          buf->curr.target_compid,
+                          buf->curr.src_sysid,
+                          buf->curr.src_compid);
+            } else {
+                log_trace("Endpoint [%d] accepted message %u to %d/%d from %u/%u",
+                          e->fd,
+                          buf->curr.msg_id,
+                          buf->curr.target_sysid,
+                          buf->curr.target_compid,
+                          buf->curr.src_sysid,
+                          buf->curr.src_compid);
+            }
             if (write_msg(e, buf) == -EPIPE) { // only TCP endpoints should return -EPIPE
                 should_process_tcp_hangups = true;
             }
             unknown = false;
             break;
         case Endpoint::AcceptState::Filtered:
-            log_trace("Endpoint [%d] filtered out message %u to %d/%d from %u/%u",
-                      e->fd,
-                      buf->curr.msg_id,
-                      buf->curr.target_sysid,
-                      buf->curr.target_compid,
-                      buf->curr.src_sysid,
-                      buf->curr.src_compid);
+            if (e->get_name() == "FlightController") {
+                log_debug("Endpoint [%d] filtered out message %u to %d/%d from %u/%u",
+                          e->fd,
+                          buf->curr.msg_id,
+                          buf->curr.target_sysid,
+                          buf->curr.target_compid,
+                          buf->curr.src_sysid,
+                          buf->curr.src_compid);
+            } else {
+                log_trace("Endpoint [%d] filtered out message %u to %d/%d from %u/%u",
+                          e->fd,
+                          buf->curr.msg_id,
+                          buf->curr.target_sysid,
+                          buf->curr.target_compid,
+                          buf->curr.src_sysid,
+                          buf->curr.src_compid);
+            }
             unknown = false;
             break;
         case Endpoint::AcceptState::Rejected:
             // fall through
         default:
+            if (e->get_name() == "FlightController") {
+                log_debug("Endpoint [%d] invalid state message %u to %d/%d from %u/%u",
+                          e->fd,
+                          buf->curr.msg_id,
+                          buf->curr.target_sysid,
+                          buf->curr.target_compid,
+                          buf->curr.src_sysid,
+                          buf->curr.src_compid);
+            }
             break; // do nothing (will count as unknown)
         }
     }
 
     if (unknown) {
         _errors_aggregate.msg_to_unknown++;
-        log_trace("Message %u to unknown sysid/compid: %d/%d",
+        log_debug("Message %u to unknown sysid/compid: %d/%d",
                   buf->curr.msg_id,
                   buf->curr.target_sysid,
                   buf->curr.target_compid);
