@@ -190,12 +190,6 @@ void Mainloop::route_msg(struct buffer *buf)
             unknown = false;
             break;
         case Endpoint::AcceptState::Rejected:
-            log_debug("Endpoint [%d]%s: Message %u to sysid/compid: %d/%d not handled",
-                  e->fd,
-                  e->get_name().c_str(),
-                  buf->curr.msg_id,
-                  buf->curr.target_sysid,
-                  buf->curr.target_compid);
             // fall through
         default:
             break; // do nothing (will count as unknown)
