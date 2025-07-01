@@ -480,6 +480,11 @@ void Endpoint::_add_sys_comp_id(uint8_t sysid, uint8_t compid)
     }
     _sys_comp_ids.push_back(sys_comp_id);
 
+    log_debug("Endpoint [%d]%s: Adding sys_comp_id: %u",
+        fd,
+        _name.c_str(),
+        sys_comp_id);
+
     // add to grouped endpoints as well
     for (auto e : _group_members) {
         e->_add_sys_comp_id(sysid, compid);
