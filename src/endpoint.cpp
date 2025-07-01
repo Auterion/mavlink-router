@@ -238,11 +238,11 @@ int Endpoint::handle_read()
         // check incoming message filters
         if (!allowed_by_dedup(&buf)) {
             if (Log::get_max_level() >= Log::Level::DEBUG) {
-                log_trace("Message %u discarded by de-duplication", buf.curr.msg_id);
+                log_debug("Message %u discarded by de-duplication", buf.curr.msg_id);
             }
         } else if (!allowed_by_incoming_filters(&buf)) {
             if (Log::get_max_level() >= Log::Level::DEBUG) {
-                log_trace("Message %u to %d/%d from %u/%u discarded by incoming filters",
+                log_debug("Message %u to %d/%d from %u/%u discarded by incoming filters",
                           buf.curr.msg_id,
                           buf.curr.target_sysid,
                           buf.curr.target_compid,
