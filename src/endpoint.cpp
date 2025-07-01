@@ -533,36 +533,42 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
     // If filter is defined and message is not in the set: discard it
     if (pbuf->curr.msg_id != UINT32_MAX && !_allowed_outgoing_msg_ids.empty()
         && !vector_contains(_allowed_outgoing_msg_ids, pbuf->curr.msg_id)) {
+        log_debug("Endpoint [%d]%s: filter1", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
     }
 
     // If filter is defined and message is in the set: discard it
     if (pbuf->curr.msg_id != UINT32_MAX && !_blocked_outgoing_msg_ids.empty()
         && vector_contains(_blocked_outgoing_msg_ids, pbuf->curr.msg_id)) {
+        log_debug("Endpoint [%d]%s: filter2", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
     }
 
     // If filter is defined and message is not in the set: discard it
     if (pbuf->curr.msg_id != UINT32_MAX && !_allowed_outgoing_src_comps.empty()
         && !vector_contains(_allowed_outgoing_src_comps, pbuf->curr.src_compid)) {
+        log_debug("Endpoint [%d]%s: filter3", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
     }
 
     // If filter is defined and message is in the set: discard it
     if (pbuf->curr.msg_id != UINT32_MAX && !_blocked_outgoing_src_comps.empty()
         && vector_contains(_blocked_outgoing_src_comps, pbuf->curr.src_compid)) {
+        log_debug("Endpoint [%d]%s: filter4", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
     }
 
     // If filter is defined and message is not in the set: discard it
     if (pbuf->curr.msg_id != UINT32_MAX && !_allowed_outgoing_src_systems.empty()
         && !vector_contains(_allowed_outgoing_src_systems, pbuf->curr.src_sysid)) {
+        log_debug("Endpoint [%d]%s: filter5", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
     }
 
     // If filter is defined and message is in the set: discard it
     if (pbuf->curr.msg_id != UINT32_MAX && !_blocked_outgoing_src_systems.empty()
         && vector_contains(_blocked_outgoing_src_systems, pbuf->curr.src_sysid)) {
+        log_debug("Endpoint [%d]%s: filter6", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
     }
 
@@ -589,6 +595,7 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
     }
 
     // Reject everything else
+    log_debug("Endpoint [%d]%s: general reject", fd, _name.c_str());
     return Endpoint::AcceptState::Rejected;
 }
 
