@@ -480,10 +480,11 @@ void Endpoint::_add_sys_comp_id(uint8_t sysid, uint8_t compid)
     }
     _sys_comp_ids.push_back(sys_comp_id);
 
-    log_debug("Endpoint [%d]%s: Adding sys_comp_id: %u",
+    log_debug("Endpoint [%d]%s: Adding sysid: %u, compid: %u",
         fd,
         _name.c_str(),
-        sys_comp_id);
+        sysid,
+        compid);
 
     // add to grouped endpoints as well
     for (auto e : _group_members) {
@@ -600,7 +601,6 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
     }
 
     // Reject everything else
-    log_debug("Endpoint [%d]%s: general reject", fd, _name.c_str());
     return Endpoint::AcceptState::Rejected;
 }
 
