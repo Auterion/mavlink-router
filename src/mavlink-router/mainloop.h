@@ -217,5 +217,6 @@ struct options {
     enum mavlink_dialect mavlink_dialect;
     unsigned long min_free_space;
     unsigned long max_log_files;
+    unsigned long dedup_period_ms;
     bool heartbeat;
 };

@@ -56,6 +56,7 @@ static struct options opt = {
     .mavlink_dialect = Auto,
     .min_free_space = 0,
     .max_log_files = 0,
+    .dedup_period_ms = 0,
     .heartbeat = false
 };
 
@@ -729,6 +730,8 @@ static int parse_confs(ConfFile &conf)
          OPTIONS_TABLE_STRUCT_FIELD(options, min_free_space)},
         {"MaxLogFiles", false, ConfFile::parse_ul,
          OPTIONS_TABLE_STRUCT_FIELD(options, max_log_files)},
+        {"DeduplicationPeriod", false, ConfFile::parse_ul,
+         OPTIONS_TABLE_STRUCT_FIELD(options, dedup_period_ms)},
     };
 
     struct option_uart {
