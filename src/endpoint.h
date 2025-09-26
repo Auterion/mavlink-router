@@ -25,6 +25,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include "comm.h"
 #include "pollable.h"
@@ -167,7 +168,7 @@ public:
     int handle_read() override;
     bool handle_canwrite() override;
 
-    virtual void print_statistics();
+    virtual void print_statistics(std::ostream& stream = std::cout);
     virtual int write_msg(const struct buffer *pbuf) = 0;
     virtual int flush_pending_msgs() = 0;
 

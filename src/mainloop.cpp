@@ -28,6 +28,8 @@
 #include <atomic>
 #include <memory>
 #include <sstream>
+#include <fstream>
+#include <chrono>
 
 #include <common/log.h>
 #include <common/util.h>
@@ -413,6 +415,22 @@ void Mainloop::handle_command_pipe()
                     log_info("Removed endpoint %s", a[1].c_str());
                 }
 
+            } else if (a[0] == "status") {
+                // Status command prints all the endpoint statistics to file 
+                status_file.open(status_filepath, std::ios::out);
+
+                // Timestamp
+                auto currentTime = std::chrono::system_clock::now(); 
+                time_t formattedTime = std::chrono::system_clock::to_time_t(currentTime);
+                status_file << "Requested status command @ " << std::ctime(&formattedTime) << std::endl;
+
+                // Endpoint data
+                for (std::shared_ptr<Endpoint>& endpoint : g_endpoints)
+                {
+                    endpoint->print_statistics(status_file);
+                }
+                status_file.close();
+                
             } else {
                 log_debug("Command Server: Unsupported command \'%s\'", a[0].c_str());
             }

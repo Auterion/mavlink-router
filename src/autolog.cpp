@@ -66,11 +66,11 @@ bool AutoLog::start()
     return true;
 }
 
-void AutoLog::print_statistics()
+void AutoLog::print_statistics(std::ostream& stream)
 {
     if (_logger) {
-        _logger->print_statistics();
+        _logger->print_statistics(stream);
     } else {
-        Endpoint::print_statistics();
+        Endpoint::print_statistics(stream);
     }
 }

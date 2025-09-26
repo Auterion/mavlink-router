@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <fstream>
 
 #include "common/log.h"
 
@@ -116,6 +117,8 @@ private:
     int g_tcp_fd = -1;      ///< for TCP server
     int g_commands_fd = -1; ///< for the named pipe commands endpoint
     std::string command_pipe_path = "";
+    std::ofstream status_file;
+    const std::string status_filepath = "/tmp/mavlink-router-status";
     std::shared_ptr<LogEndpoint> _log_endpoint{nullptr};
 
     Timeout *_timeouts = nullptr;

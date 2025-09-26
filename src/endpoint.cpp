@@ -683,27 +683,21 @@ bool Endpoint::_check_crc(const mavlink_msg_entry_t *msg_entry) const
     return crc_calc == crc_msg;
 }
 
-void Endpoint::print_statistics()
+void Endpoint::print_statistics(std::ostream& stream)
 {
     const uint32_t read_total = _stat.read.total == 0 ? 1 : _stat.read.total;
 
-    printf("%s Endpoint [%d]%s {", _type.c_str(), fd, _name.c_str());
-    printf("\n\tReceived messages {");
-    printf("\n\t\tCRC error: %u %u%% %" PRIu64 "KB",
-           _stat.read.crc_error,
-           (_stat.read.crc_error * 100) / read_total,
-           _stat.read.crc_error_bytes / 1000);
-    printf("\n\t\tSequence lost: %u %u%%",
-           _stat.read.drop_seq_total,
-           (_stat.read.drop_seq_total * 100) / read_total);
-    printf("\n\t\tHandled: %u %" PRIu64 "KB", _stat.read.handled, _stat.read.handled_bytes / 1000);
-    printf("\n\t\tTotal: %u", _stat.read.total);
-    printf("\n\t}");
-    printf("\n\tTransmitted messages {");
-    printf("\n\t\tTotal: %u %" PRIu64 "KB", _stat.write.total, _stat.write.bytes / 1000);
-    printf("\n\t}");
-    printf("\n}\n");
-    fflush(stdout);
+    stream << _type << "Endpoint [" << fd << "]" << _name << "{" <<
+            "\n\tReceived messages {" <<
+            "\n\t\tCRC error: " << _stat.read.crc_error << ", " << (_stat.read.crc_error * 100) / read_total <<
+            "%, " << _stat.read.crc_error_bytes / 1000 << "KB" <<
+            "\n\t\tSequence lost: " << _stat.read.drop_seq_total << ", " << 
+            (_stat.read.drop_seq_total * 100) / read_total << "%" <<
+            "\n\t\tHandled: " << _stat.read.handled << ", " << _stat.read.handled_bytes / 1000 << "KB" <<
+            "\n\t\tTotal: " << _stat.read.total << 
+            "\n\t}" << "\n\tTransmitted messages {" <<
+            "\n\t\tTotal: " << _stat.write.total << ", " << _stat.write.bytes / 1000 << "KB" <<
+            "\n\t}" << "\n}\n" << std::flush;
 }
 
 uint8_t Endpoint::get_trimmed_zeros(const mavlink_msg_entry_t *msg_entry,
