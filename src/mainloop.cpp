@@ -347,7 +347,7 @@ void Mainloop::handle_command_pipe()
                     parse_into_vector(a[10], conf.allow_msg_id_out);
                     parse_into_vector(a[11], conf.block_msg_id_out);
                     parse_into_vector(a[12], conf.allow_src_comp_out);
-                    parse_into_vector(a[14], conf.block_src_comp_out);
+                    parse_into_vector(a[13], conf.block_src_comp_out);
                     parse_into_vector(a[14], conf.allow_src_sys_out);
                     parse_into_vector(a[15], conf.block_src_sys_out);
                     parse_into_vector(a[16], conf.allow_msg_id_in);
