@@ -66,7 +66,7 @@ bool AutoLog::start()
     return true;
 }
 
-void AutoLog::print_statistics(std::ostream& stream)
+void AutoLog::print_statistics(std::ostream &stream)
 {
     if (_logger) {
         _logger->print_statistics(stream);
