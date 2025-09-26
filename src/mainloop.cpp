@@ -158,11 +158,14 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::route_msg(struct buffer *buf)
+void Mainloop::route_msg(Endpoint *src, struct buffer *buf)
 {
     bool unknown = true;
 
     for (const auto &e : this->g_endpoints) {
+        if (e.get() == src)
+            continue; // do not echo to the same endpoint
+
         auto acceptState = e->accept_msg(buf);
 
         switch (acceptState) {

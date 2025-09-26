@@ -251,7 +251,7 @@ int Endpoint::handle_read()
             }
         } else {
             _add_sys_comp_id(buf.curr.src_sysid, buf.curr.src_compid);
-            Mainloop::get_instance().route_msg(&buf);
+            Mainloop::get_instance().route_msg(this, &buf);
         }
     }
 
@@ -522,12 +522,6 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
         for (const auto &id : _sys_comp_ids) {
             log_trace("\t\t%u/%u", (id >> 8), id & 0xff);
         }
-    }
-
-    // This endpoint sent the message, we don't want to send it back over the
-    // same channel to avoid loops: reject
-    if (has_sys_comp_id(pbuf->curr.src_sysid, pbuf->curr.src_compid)) {
-        return Endpoint::AcceptState::Rejected;
     }
 
     // If filter is defined and message is not in the set: discard it
