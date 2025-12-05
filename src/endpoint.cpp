@@ -240,6 +240,12 @@ int Endpoint::handle_read()
 
         // check incoming message filters
         if (!allowed_by_dedup(&buf)) {
+            /*
+             * Even if we discard the message because of de-duplication, we still register
+             * the fact that such (sys_id,comp_id) is reachable through this endpoint
+            */
+            _add_sys_comp_id(buf.curr.src_sysid, buf.curr.src_compid);
+
             if (Log::get_max_level() >= Log::Level::DEBUG) {
                 log_trace("Message %u discarded by de-duplication", buf.curr.msg_id);
             }
