@@ -490,6 +490,19 @@ int Mainloop::loop()
             }
 
             if (events[i].events & EPOLLERR) {
+                int err = 0;
+                socklen_t len = sizeof(err);
+
+                if (getsockopt(p->fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
+                    perror("getsockopt(SO_ERROR)");
+                } else {
+                    if (err == 0) {
+                        log_error("Socket %d: no pending error", p->fd);
+                    } else {
+                        log_error("Socket %d: SO_ERROR = %d (%s)",
+                               p->fd, err, strerror(err));
+                    }
+                }
                 if (events[i].events & EPOLLHUP && !p->is_critical()) {
                     // EPOLLHUP is an expected error, in case the TCP connection
                     // drops. In this case, we'll just need to clean up the TCP
