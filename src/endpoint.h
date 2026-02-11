@@ -391,7 +391,6 @@ public:
     int write_msg(const struct buffer *pbuf) override;
     int flush_pending_msgs() override;
     bool is_valid() override { return _valid; };
-    bool is_critical() override { return false; };
 
     Endpoint::AcceptState accept_msg(const struct buffer *pbuf) const override;
 
@@ -405,6 +404,8 @@ public:
     static bool validate_config(const TcpEndpointConfig &config);
 
     void add_no_coalesce_msg_id(uint32_t msg_id) { _coalesce_nodelay.insert(msg_id); }
+
+    void set_invalid() { _valid = false; }
 
 protected:
     bool open(const std::string &ip, unsigned long port);
