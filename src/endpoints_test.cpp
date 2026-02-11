@@ -660,7 +660,6 @@ TEST(TcpEndpointTest, Init)
 
     EXPECT_EQ(tcp.get_type(), ENDPOINT_TYPE_TCP);
     EXPECT_TRUE(tcp.is_valid());
-    EXPECT_FALSE(tcp.is_critical());
 
     // we can't call setup() without a TCP server to connect to
 }

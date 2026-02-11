@@ -490,12 +490,18 @@ int Mainloop::loop()
             }
 
             if (events[i].events & EPOLLERR) {
-                if (events[i].events & EPOLLHUP && !p->is_critical()) {
-                    // EPOLLHUP is an expected error, in case the TCP connection
-                    // drops. In this case, we'll just need to clean up the TCP
-                    // connection later, no need to panic.
-                    log_debug("Non-critical error for fd %i.", p->fd);
+                auto tcp_endpoint = dynamic_cast<TcpEndpoint *>(p);
+                if (tcp_endpoint) {
+                    // If we get EPOLLERR for TCP we close the connection.
+                    // If the connection was closed cleanly we also get EPOLLHUP.
+                    tcp_endpoint->set_invalid();
                     should_process_tcp_hangups = true;
+                    if (events[i].events & EPOLLHUP) {
+                        log_debug("Got EPOLLHUP for TCP connection, fd %i.", p->fd);
+                    } else {
+                        log_warning("Poll error for TCP connection, fd %i, closing.", p->fd);
+                    }
+
                 } else {
                     log_error("Critical error for fd %i, exiting", p->fd);
                     request_exit(EXIT_FAILURE);
