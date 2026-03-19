@@ -25,6 +25,7 @@ import subprocess
 import sys
 import time
 from pymavlink import mavutil
+import psutil
 
 SENDER_NUM_MESSAGES = 10
 
@@ -116,6 +117,12 @@ def expect_len(name, msgs, expected):
     return True
 
 
+def is_udp_port_bound(port):
+    for conn in psutil.net_connections(kind='udp'):
+        if conn.laddr.port == port:
+            return True
+    return False
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='MAVLink Router Message Routing System Test')
@@ -132,6 +139,10 @@ if __name__ == "__main__":
     ],
                           stderr=sys.stdout.fileno(),
                           stdout=sys.stdout.fileno()) as proc:
+        
+        # Wait for mavlink router to start (for it to bind socket 127.0.0.1:10000)
+        while not is_udp_port_bound(10000):
+            time.sleep(0.2)
 
         # Two senders: one send to all (target 0). The other sends to target 100/1
         sender0 = MavlinkSender("sender0", 10000, 1, 1, 0, 0)
