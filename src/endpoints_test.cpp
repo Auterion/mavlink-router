@@ -35,8 +35,8 @@
 class TestEndpoint : public Endpoint {
 public:
     TestEndpoint()
-        : Endpoint{"Test", "foobar"} {};
-    ~TestEndpoint() override{};
+        : Endpoint{"Test", "foobar"} { };
+    ~TestEndpoint() override { };
 
     // dummy-implement virtual methods
     int write_msg(const struct buffer *pbuf) override { return true; };
@@ -659,13 +659,16 @@ TEST(UdpEndpointTest, ConfigValidateMulticastAddress)
 
     // valid multicast addresses (224.0.0.0 - 239.255.255.255)
     config.address = "224.0.0.1";
-    EXPECT_TRUE(UdpEndpoint::validate_config(config)) << "with multicast address " << config.address;
+    EXPECT_TRUE(UdpEndpoint::validate_config(config))
+        << "with multicast address " << config.address;
 
     config.address = "239.255.255.250";
-    EXPECT_TRUE(UdpEndpoint::validate_config(config)) << "with multicast address " << config.address;
+    EXPECT_TRUE(UdpEndpoint::validate_config(config))
+        << "with multicast address " << config.address;
 
     config.address = "239.255.145.50";
-    EXPECT_TRUE(UdpEndpoint::validate_config(config)) << "with multicast address " << config.address;
+    EXPECT_TRUE(UdpEndpoint::validate_config(config))
+        << "with multicast address " << config.address;
 
     // valid unicast addresses (for comparison)
     config.address = "192.168.1.1";
