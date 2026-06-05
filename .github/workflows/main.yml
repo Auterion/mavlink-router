@@ -16,6 +16,7 @@ jobs:
         with:
           clang-format-version: "13"
           check-path: "src"
+          style: file
 
   build:
     runs-on: ubuntu-24.04
