@@ -36,7 +36,7 @@ class TestEndpoint : public Endpoint {
 public:
     TestEndpoint()
         : Endpoint{"Test", "foobar"} {};
-    ~TestEndpoint() override{};    // dummy-implement virtual methods
+    ~TestEndpoint() override {};
 
     // dummy-implement virtual methods
     int write_msg(const struct buffer *pbuf) override { return true; };
