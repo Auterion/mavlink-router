@@ -246,6 +246,8 @@ Baud = 52000
 # Binding or target IP address (depending on mode).
 # IPv6 addresses must be encosed in square brackets like `[::1]`.
 # Binding to `0.0.0.0` or `[::]` will listen on all interfaces.
+# If a multicast address is specified (224.0.0.0 - 239.255.255.255) in server
+# mode, mavlink-router will automatically join that multicast group.
 # Mandatory, no default value
 #Address = 
 
@@ -270,6 +272,12 @@ Port = 10000
 Mode = Normal
 Address = 127.0.0.1
 Port = 11000
+
+# join multicast group 239.255.145.50 on port 14550
+[UdpEndpoint multicast_example]
+Mode = Server
+Address = 239.255.145.50
+Port = 14550
 
 
 ##
