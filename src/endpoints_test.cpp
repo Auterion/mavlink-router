@@ -34,8 +34,9 @@
 // Create custom inhertited class b/c Endpoint can't be initialized containing pure virtual methods
 class TestEndpoint : public Endpoint {
 public:
-  TestEndpoint() : Endpoint{"Test", "foobar"} {};
-  ~TestEndpoint() override {};
+    TestEndpoint()
+        : Endpoint{"Test", "foobar"} {};
+    ~TestEndpoint() override{};    // dummy-implement virtual methods
 
     // dummy-implement virtual methods
     int write_msg(const struct buffer *pbuf) override { return true; };
