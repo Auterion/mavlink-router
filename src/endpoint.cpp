@@ -1350,7 +1350,7 @@ bool UdpEndpoint::open(const char *ip, unsigned long port, UdpEndpointConfig::Mo
     }
 
     // common setup
-    if (mode == UdpEndpointConfig::Mode::Client) {
+    if (mode == UdpEndpointConfig::Mode::Client || mode == UdpEndpointConfig::Mode::Sender) {
         if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &broadcast_val, sizeof(broadcast_val))) {
             log_error("Error enabling broadcast in socket for %s:%lu (%m)", ip, port);
             goto fail;
@@ -1372,6 +1372,8 @@ bool UdpEndpoint::open(const char *ip, unsigned long port, UdpEndpointConfig::Mo
         log_info("Opened UDP Server [%d]%s: %s:%lu", fd, _name.c_str(), ip, port);
     } else if (mode == UdpEndpointConfig::Mode::Receiver) {
         log_info("Opened UDP Receiver [%d]%s: %s:%lu", fd, _name.c_str(), ip, port);
+    } else if (mode == UdpEndpointConfig::Mode::Sender) {
+        log_info("Opened UDP Sender [%d]%s: %s:%lu", fd, _name.c_str(), ip, port);
     } else {
         log_info("Opened UDP Client [%d]%s: %s:%lu", fd, _name.c_str(), ip, port);
     }
@@ -1566,6 +1568,8 @@ int UdpEndpoint::parse_udp_mode(const char *val, size_t val_len, void *storage, 
         *udp_mode = UdpEndpointConfig::Mode::Server;
     } else if (memcaseeq(val, val_len, "receiver", sizeof("receiver") - 1)) {
         *udp_mode = UdpEndpointConfig::Mode::Receiver;
+    } else if (memcaseeq(val, val_len, "sender", sizeof("sender") - 1)) {
+        *udp_mode = UdpEndpointConfig::Mode::Sender;
     } else {
         log_error("Unknown 'mode' key: %.*s", (int)val_len, val);
         return -EINVAL;
@@ -1597,7 +1601,8 @@ bool UdpEndpoint::validate_config(const UdpEndpointConfig &config)
 
     if (config.mode != UdpEndpointConfig::Mode::Client
         && config.mode != UdpEndpointConfig::Mode::Server
-        && config.mode != UdpEndpointConfig::Mode::Receiver) {
+        && config.mode != UdpEndpointConfig::Mode::Receiver
+        && config.mode != UdpEndpointConfig::Mode::Sender) {
         return false;
     }
 
@@ -1610,6 +1615,21 @@ Endpoint::AcceptState UdpEndpoint::accept_msg(const struct buffer *pbuf) const
     if (this->_mode == UdpEndpointConfig::Mode::Receiver) {
         log_trace("Endpoint [%d]%s: in Receiver mode, not sending back any msg", fd, _name.c_str());
         return Endpoint::AcceptState::Filtered;
+    }
+
+    // accept everything when UDP endpoint is in sender mode (still respecting filters)
+    if (this->_mode == UdpEndpointConfig::Mode::Sender) {
+        // Do not send back messages to the source if the source is in the system/component filter list, even in sender mode
+        if (has_sys_comp_id(pbuf->curr.src_sysid, pbuf->curr.src_compid)) {
+            return Endpoint::AcceptState::Rejected;
+        }
+        // Still respect filters
+        if (accept_msg(pbuf) == Endpoint::AcceptState::Filtered) {
+            return Endpoint::AcceptState::Filtered;
+        }
+
+        log_trace("Endpoint [%d]%s: in Sender mode, accepting since message is not filtered", fd, _name.c_str());
+        return Endpoint::AcceptState::Accepted;
     }
 
     // otherwise: refer to standard accept rules

@@ -345,6 +345,8 @@ void Mainloop::handle_command_pipe()
                     conf.mode = UdpEndpointConfig::Mode::Server;
                 } else if (a[5] == "receiver" || a[5] == "Receiver") {
                     conf.mode = UdpEndpointConfig::Mode::Receiver;
+                } else if (a[5] == "sender" || a[5] == "Sender") {
+                    conf.mode = UdpEndpointConfig::Mode::Sender;
                 } else if (a[5] == "client" || a[5] == "Client") {
                     conf.mode = UdpEndpointConfig::Mode::Client;
                 } else {

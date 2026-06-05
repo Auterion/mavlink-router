@@ -62,7 +62,7 @@ struct UartEndpointConfig {
 };
 
 struct UdpEndpointConfig {
-    enum class Mode { Undefined = 0, Server, Client, Receiver };
+    enum class Mode { Undefined = 0, Server, Client, Receiver, Sender };
 
     std::string name;
     std::string address;
