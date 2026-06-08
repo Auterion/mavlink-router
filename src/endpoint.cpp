@@ -1624,7 +1624,7 @@ Endpoint::AcceptState UdpEndpoint::accept_msg(const struct buffer *pbuf) const
             return Endpoint::AcceptState::Rejected;
         }
         // Still respect filters
-        if (accept_msg(pbuf) == Endpoint::AcceptState::Filtered) {
+        if (Endpoint::accept_msg(pbuf) == Endpoint::AcceptState::Filtered) {
             return Endpoint::AcceptState::Filtered;
         }
 
