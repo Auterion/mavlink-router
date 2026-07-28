@@ -48,7 +48,9 @@
 
 #include "mainloop.h"
 
-#define RX_BUF_MAX_SIZE (MAVLINK_MAX_PACKET_LEN * 4)
+/* Large enough that one decompressed UDP datagram (a whole coalesced batch, up
+ * to TX_BUF_MAX_SIZE) fits when a ZstdCompression endpoint inflates it. */
+#define RX_BUF_MAX_SIZE (8U * 1024U)
 #define TX_BUF_MAX_SIZE (8U * 1024U)
 
 #define UART_BAUD_RETRY_SEC 5
@@ -101,6 +103,8 @@ const ConfFile::OptionsTable UdpEndpoint::option_table[] = {
     {"CoalesceMs",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_ms)},
     {"CoalesceNoDelay", false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_nodelay)},
     {"MsgThrottling",   false,  ConfFile::parse_pair_vector,    OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, message_throttling)},
+    {"ZstdCompression", false,  ConfFile::parse_bool,           OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, zstd_compression)},
+    {"ZstdDictionary",  false,  ConfFile::parse_stdstring,      OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, zstd_dictionary)},
     {}
 };
 
@@ -1237,6 +1241,21 @@ bool UdpEndpoint::setup(UdpEndpointConfig conf)
         this->set_message_throttling(msg_id, throttle_cfg.second);
     }
 
+    // Per-datagram ZSTD compression. When enabled, every outgoing datagram is
+    // compressed into a standalone frame and every incoming one is decompressed
+    // if it carries the ZSTD magic.
+    if (conf.zstd_compression) {
+        _zstd_codec = std::make_unique<ZstdCodec>();
+        if (!_zstd_codec->init(conf.zstd_dictionary)) {
+            log_error("UDP %s: failed to initialise ZSTD codec", conf.name.c_str());
+            _zstd_codec.reset();
+            return false;
+        }
+        log_info("UDP %s: ZSTD compression enabled (dictionary: %s)",
+                 conf.name.c_str(),
+                 conf.zstd_dictionary.empty() ? "none" : conf.zstd_dictionary.c_str());
+    }
+
     return true;
 }
 
@@ -1429,6 +1448,17 @@ ssize_t UdpEndpoint::_read_msg(uint8_t *buf, size_t len)
         return -errno;
     }
 
+    // Decompress the datagram in place if this endpoint is compressed and the
+    // payload carries the ZSTD magic (plain MAVLink is passed through). One UDP
+    // datagram is exactly one ZSTD frame, so no cross-datagram reassembly.
+    if (_zstd_codec && r > 0) {
+        ssize_t d = _zstd_codec->inflate(buf, (size_t)r, len);
+        if (d < 0) {
+            return 0; // corrupt / oversized frame -> drop this datagram
+        }
+        r = d;
+    }
+
     // Update timeout
     if (nomessage_timeout) {
         Mainloop::get_instance().mod_timeout(nomessage_timeout, 5 * MSEC_PER_SEC);
@@ -1523,7 +1553,21 @@ int UdpEndpoint::flush_pending_msgs()
         return 0;
     }
 
-    ssize_t r = ::sendto(fd, tx_buf.data, tx_buf.len, 0, sock, addrlen);
+    // Compress the whole coalesced batch into one standalone ZSTD frame. The
+    // codec returns nullptr (send plain) for skip-listed messages or when
+    // compression would not shrink the datagram.
+    const uint8_t *out_data = tx_buf.data;
+    size_t out_len = tx_buf.len;
+    if (_zstd_codec) {
+        size_t clen = 0;
+        const uint8_t *c = _zstd_codec->compress(tx_buf.data, tx_buf.len, &clen);
+        if (c != nullptr) {
+            out_data = c;
+            out_len = clen;
+        }
+    }
+
+    ssize_t r = ::sendto(fd, out_data, out_len, 0, sock, addrlen);
     if (r == -1) {
         if (errno != EAGAIN && errno != ECONNREFUSED && errno != ENETUNREACH) {
             log_error("UDP %s: Error sending udp packet (%m)", _name.c_str());
@@ -1534,9 +1578,9 @@ int UdpEndpoint::flush_pending_msgs()
     _stat.write.total++;
     _stat.write.bytes += r;
 
-    tx_buf.len = std::max(ssize_t(0), (ssize_t)tx_buf.len - r);
-    // memcpy isn't safe for overlapping regions
-    memmove(tx_buf.data, &tx_buf.data[r], tx_buf.len);
+    // UDP sendto is atomic: on success the whole datagram (compressed or not)
+    // left in one packet, so the tx buffer is now fully consumed.
+    tx_buf.len = 0;
 
     log_trace("UDP [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
 
