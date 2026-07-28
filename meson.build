@@ -27,6 +27,12 @@ dep_math = cxx.find_library('m')
 dep_rt = cxx.find_library('rt')
 dep_thread = dependency('threads')
 
+# Optional: ZSTD compression for UDP endpoints. Auto-enabled when libzstd is
+# available; compiled out cleanly otherwise (the ZstdCompression option then
+# fails at startup with a clear message).
+dep_zstd = dependency('libzstd', required: get_option('zstd'))
+have_zstd = dep_zstd.found()
+
 # Optional dependencies
 systemd_system_unit_dir = get_option('systemdsystemunitdir')
 if systemd_system_unit_dir == 'auto'
@@ -110,6 +116,8 @@ conf.set10('HAVE_WADDRESS_OF_PACKED_MEMBER', has_waddress_of_packed_member)
 
 has_aio_init_symbols = cxx.has_header_symbol('aio.h', 'aio_init')
 conf.set10('HAVE_DECL_AIO_INIT', has_aio_init_symbols)
+
+conf.set10('HAVE_ZSTD', have_zstd)
 
 # Always include config.h
 config_h = configure_file(output : 'config.h', configuration : conf)

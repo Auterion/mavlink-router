@@ -2,3 +2,7 @@ option('systemdsystemunitdir',
        description: 'systemd unit directory',
        type: 'string',
        value: 'auto')
+option('zstd',
+       description: 'ZSTD compression support for UDP endpoints (needs libzstd)',
+       type: 'feature',
+       value: 'auto')

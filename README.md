@@ -201,6 +201,61 @@ Defining endpoints:
     * (This means that UART, UDP and TCP client endpoints are never destroyed
       during runtime.)
 
+### ZSTD Compression
+A UDP endpoint can optionally ZSTD-compress its traffic, to save bandwidth on a
+constrained link (e.g. a telemetry radio). It is configured per endpoint:
+
+```ini
+[UdpEndpoint radio]
+Mode = Normal
+Address = 127.0.0.1
+Port = 13336
+ZstdCompression = true
+ZstdDictionary  = /usr/share/mavlink-router/mavlink_zstd.dict
+```
+
+  - `ZstdCompression` (bool, default `false`): enable compression on this
+    endpoint.
+  - `ZstdDictionary` (path, optional): a trained Zstandard dictionary to improve
+    the ratio on small MAVLink messages. Without it, compression still works but
+    is less effective.
+
+Behavior:
+
+  - Each outgoing datagram (one coalesced batch of framed MAVLink messages) is
+    compressed into a single standalone ZSTD frame (level 3).
+  - Time-critical messages (HEARTBEAT, SYSTEM_TIME, PING, MISSION_CURRENT,
+    COMMAND_LONG, COMMAND_ACK, TIMESYNC, CURRENT_EVENT_SEQUENCE, REQUEST_EVENT),
+    and any datagram that does not get smaller, are sent uncompressed instead.
+  - On receive, each datagram is auto-detected by its ZSTD magic and
+    decompressed; plain MAVLink is passed through unchanged. There is no
+    negotiation, so a mixed stream decodes correctly.
+
+Both ends of the link must enable `ZstdCompression`, and — if used — must be
+configured with the **same** `ZstdDictionary`.
+
+#### Generating the dictionary
+The dictionary is trained from a representative sample of the MAVLink traffic
+that will cross the link (ideally captured from real flights). Use
+[`tools/train-zstd-dict.sh`](tools/train-zstd-dict.sh), which needs `zstd` and
+`tshark` (and `tcpdump` for live capture):
+
+```sh
+# From a folder of pcaps (recommended; auto-detects the MAVLink port):
+tools/train-zstd-dict.sh --folder /path/to/pcaps 0 mavlink_zstd.dict
+
+# From a single pcap:
+tools/train-zstd-dict.sh --pcap capture.pcap 0 mavlink_zstd.dict
+
+# Or capture live on a port for N seconds, then train:
+tools/train-zstd-dict.sh 14550 120 mavlink_zstd.dict
+```
+
+It extracts each UDP payload as an individual sample file (zstd trains better on
+many small samples) and runs `zstd --train --maxdict=16384` to produce a 16&nbsp;KiB
+dictionary (override with the `DICT_SIZE` env var). Install the result to the
+path referenced by `ZstdDictionary` and deploy the identical file to both ends.
+
 ### Message Routing
 In general, each message received on one endpoint is delivered to all endpoints
 in which that target system/component has been seen. If it's a broadcast

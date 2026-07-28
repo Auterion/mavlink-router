@@ -32,6 +32,7 @@
 #include "comm.h"
 #include "pollable.h"
 #include "timeout.h"
+#include "zstd_codec.h"
 
 #define DEFAULT_BAUDRATE 115200U
 
@@ -85,6 +86,8 @@ struct UdpEndpointConfig {
     unsigned long coalesce_ms;
     std::vector<uint32_t> coalesce_nodelay;
     std::vector<std::pair<float, float>> message_throttling;
+    bool zstd_compression{false};
+    std::string zstd_dictionary;
 };
 
 struct TcpEndpointConfig {
@@ -409,6 +412,10 @@ private:
     struct sockaddr_in sockaddr;
     struct sockaddr_in6 sockaddr6;
     std::set<uint32_t> _coalesce_nodelay{}; // immediately send if a mavlink msg_id is in this set
+
+    // Per-datagram ZSTD compression on this endpoint's link (null when
+    // ZstdCompression is off for this endpoint).
+    std::unique_ptr<ZstdCodec> _zstd_codec;
 };
 
 class TcpEndpoint : public Endpoint {
