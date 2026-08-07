@@ -518,6 +518,12 @@ int Mainloop::loop()
                 continue;
             }
 
+            if (_api_server != nullptr && events[i].data.ptr == &(_api_server->fd)) {
+                // New client wants to connect to the API server
+                _api_server->accept_client();
+                continue;
+            }
+
             auto *p = static_cast<Pollable *>(events[i].data.ptr);
 
             if (events[i].events & EPOLLIN) {
@@ -556,6 +562,9 @@ int Mainloop::loop()
 
         if (should_process_tcp_hangups) {
             process_tcp_hangups();
+        }
+        if (_api_server != nullptr) {
+            _api_server->process_client_hangups();
         }
 
         _del_timeouts();
@@ -679,6 +688,17 @@ bool Mainloop::add_endpoints(const Configuration &config)
     if (!config.command_pipe_path.empty()) {
         command_pipe_path = config.command_pipe_path;
         g_commands_fd = open_command_pipe(command_pipe_path);
+    }
+
+    // Create API server
+    if (!config.api_socket_path.empty()) {
+        api_socket_path = config.api_socket_path;
+        _api_server = std::make_shared<ApiServer>(api_socket_path);
+        if (!_api_server->setup()) {
+            _api_server = nullptr;
+        } else {
+            this->add_fd(_api_server->fd, &(_api_server->fd), EPOLLIN);
+        }
     }
 
     // Create Log endpoint

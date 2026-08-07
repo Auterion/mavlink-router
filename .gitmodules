@@ -1,3 +1,6 @@
 [submodule "modules/mavlink_c_library_v2"]
     path = modules/mavlink_c_library_v2
     url = https://github.com/mavlink/c_library_v2.git
+[submodule "subprojects/nlohmann_json"]
+	path = subprojects/nlohmann_json
+	url = https://github.com/nlohmann/json.git

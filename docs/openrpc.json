@@ -1,0 +1,168 @@
+{
+  "openrpc": "1.4.x",
+  "info": {
+    "version": "1.0.0",
+    "title": "Mavlink-Router API",
+    "description": "Mavlink-Router API is a JSON-RPC interface to interact with the mavlink-router. It follows the JSON-RPC 2.0 specification (see https://www.jsonrpc.org/specification) where newline character `\n` has been chosen as terminator character (NDJSON). The current implementation does not support batch requests (multiple requests in a single JSON array), but it supports pipelined requests (multiple NDJSON requests sent at once).",
+    "license": {
+      "name": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "name": "Mavlink-Router API server",
+      "url": "unix:///tmp/mavlink-router.sock"
+    }
+  ],
+  "methods": [
+    {
+      "name": "get_version",
+      "summary": "Return mavlink-router version",
+      "params": [],
+      "result": {
+        "name": "version",
+        "description": "Mavlink-router version",
+        "schema": {
+          "$ref": "#/components/schemas/Version"
+        }
+      }
+    },
+
+    {
+      "name": "get_endpoints",
+      "summary": "Return the list of endpoints and their high level configuration",
+      "params": [
+        {
+          "name": "endpoint_names",
+          "description": "Array of endpoint names to filter the results. If omitted, all endpoints are returned.",
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "examples": ["PX4", "GCS"]
+          }
+        }
+      ],
+      "result": {
+        "name": "endpoints",
+        "description": "List of endpoints",
+        "schema": {
+          "$ref": "#/components/schemas/Endpoints"
+        }
+      },
+      "examples": [
+        {
+          "name": "get_endpoints",
+          "params": [
+            {
+              "name": "endpoint_names",
+              "value": ["PX4", "GCS"]
+            }
+          ],
+          "result": {
+            "name": "endpoints",
+            "value": [
+              {
+                "name": "PX4",
+                "type": "UART",
+                "group": "",
+                "fd": 5,
+                "known_components": [{ "sysid": 1, "compid": 1 }]
+              },
+              {
+                "name": "GCS",
+                "type": "UDP",
+                "group": "G1",
+                "fd": 7,
+                "known_components": [{ "sysid": 255, "compid": 190 }]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+
+  "components": {
+    "schemas": {
+      "Version": {
+        "name": "version",
+        "description": "Semantic version",
+        "type": "string",
+        "examples": ["1.5.0"]
+      },
+      "Endpoints": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Endpoint"
+        },
+        "examples": [
+          [
+            {
+                "name": "PX4",
+                "type": "UART",
+                "group": "",
+                "fd": 5,
+                "known_components": [{ "sysid": 1, "compid": 1 }]
+            },
+            {
+                "name": "GCS",
+                "type": "UDP",
+                "group": "G1",
+                "fd": 7,
+                "known_components": [{ "sysid": 255, "compid": 190 }]
+            }
+          ]
+        ]
+      },
+      "Endpoint": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Endpoint name",
+            "examples": ["PX4"]
+          },
+          "type": {
+            "type": "string",
+            "description": "Endpoint type",
+            "enum": ["UDP", "TCP", "UART", "Log"]
+          },
+          "group": {
+            "type": "string",
+            "description": "Endpoint group",
+            "examples": ["G1",""]
+          },
+          "fd": {
+            "type": "integer",
+            "description": "File descriptor associated with the endpoint",
+            "examples": [5]
+          },
+          "known_components": {
+            "type": "array",
+            "description": "List of known MAVLink components known to the endpoint",
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            }
+          }
+        }
+      },
+      "Component": {
+        "type": "object",
+        "properties": {
+          "sysid": {
+            "type": "integer",
+            "description": "MAVLink system ID",
+            "examples": [1,2,3,255]
+          },
+          "compid": {
+            "type": "integer",
+            "description": "MAVLink component ID",
+            "examples": [1,60,190]
+          }
+        }
+      }
+    }
+  }
+}

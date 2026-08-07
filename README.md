@@ -17,8 +17,8 @@ In order to compile you need the following packages:
 
 ### Fetch dependencies
 
-We currently depend on the mavlink C library. The corresponding submodule
-should be fetched:
+We currently depend on the mavlink C library and on nlohmann/json. The
+corresponding submodules should be fetched:
 
     $ git submodule update --init --recursive
 
@@ -323,6 +323,24 @@ data as `.tlog` file using the `LogTelemetry` key in the `General` section
 stack logging is set! 
 All options from flightstack logging apply also here.
 
+### JSON-RPC API
+
+Mavlink-router can expose a [JSON-RPC 2.0](https://www.jsonrpc.org/specification)
+API to let other processes interact with it at runtime. It's disabled by default
+and enabled by setting a socket path in the `General` section of the config
+file:
+
+    [General]
+    APISocketPath=/tmp/mavlink-router.sock
+
+The server listens on that Unix domain stream socket for newline delimited JSON
+(NDJSON) requests. Requests can be pipelined, but batch requests (an array of
+requests) are not supported.
+
+The available methods, their parameters and the error codes are described in
+[docs/openrpc.json](docs/openrpc.json) (with the [OpenRPC](https://open-rpc.org/) format).
+
+[![Open in OpenRPC Playground](https://img.shields.io/badge/OpenRPC-Playground-blue)](https://playground.open-rpc.org/?url=https://raw.githubusercontent.com/Auterion/mavlink-router/tree/feat/api_server/docs/openrpc.json)
 
 ## Contributing
 

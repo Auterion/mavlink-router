@@ -48,6 +48,10 @@
 # Default: "" (command disabled)
 #CommandPipePath = /tmp/mavlink_router_pipe
 
+# API unix socket path. A JSON-RPC API is offered through the specified socket.
+# Default: "" (API server disabled)
+#APISocketPath = /tmp/mavlink-router.sock
+
 ## TCP Server Endpoints
 
 # Listen for TCP connections on this port. Set to 0 to disable.

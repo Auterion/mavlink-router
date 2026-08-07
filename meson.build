@@ -35,6 +35,7 @@ if systemd_system_unit_dir == 'auto'
 endif
 
 dep_gtest = dependency('gtest', main : true, required : false)
+dep_json = subproject('nlohmann_json').get_variable('nlohmann_json_dep').as_system()
 
 # Additional warnings
 possible_cc_flags = [

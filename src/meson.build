@@ -11,6 +11,8 @@ exe_mavlink_router = executable('mavlink-routerd',
          'main.cpp',
          'mainloop.cpp',
          'pollable.cpp',
+         'api/api_methods.cpp',
+         'api/api_server.cpp',
          'timeout.cpp',
          'ulog.cpp',
          'tlog.cpp',
@@ -21,6 +23,7 @@ exe_mavlink_router = executable('mavlink-routerd',
                 dep_math,
                 dep_rt,
                 dep_thread,
+                dep_json,
         ],
         link_with: libcommon_private,
         install: true,
@@ -37,6 +40,8 @@ if dep_gtest.found()
             'mainloop.cpp',
             'mainloop_test.cpp',
             'pollable.cpp',
+            'api/api_methods.cpp',
+            'api/api_server.cpp',
             'timeout.cpp',
             'ulog.cpp',
             'tlog.cpp',
@@ -46,6 +51,7 @@ if dep_gtest.found()
           dependencies : [
             dep_gtest,
             dep_rt,
+            dep_json,
           ],
           link_with: libcommon_private,
           install: false,
@@ -63,6 +69,8 @@ if dep_gtest.found()
             'logendpoint.cpp',
             'mainloop.cpp',
             'pollable.cpp',
+            'api/api_methods.cpp',
+            'api/api_server.cpp',
             'timeout.cpp',
             'ulog.cpp',
             'tlog.cpp',
@@ -72,10 +80,40 @@ if dep_gtest.found()
           dependencies : [
             dep_gtest,
             dep_rt,
+            dep_json,
           ],
           link_with: libcommon_private,
           install: false,
           cpp_args: ['-w']
   )
   test('endpoints', exe_endpoints_test)
+
+  exe_api_test = executable('api_test',
+          [
+            'autolog.cpp',
+            'binlog.cpp',
+            'dedup.cpp',
+            'endpoint.cpp',
+            'api/api_test.cpp',
+            'logendpoint.cpp',
+            'mainloop.cpp',
+            'pollable.cpp',
+            'api/api_methods.cpp',
+            'api/api_server.cpp',
+            'timeout.cpp',
+            'ulog.cpp',
+            'tlog.cpp',
+            version_h,
+          ],
+          include_directories: [src_inc, mavlink_inc],
+          dependencies : [
+            dep_gtest,
+            dep_rt,
+            dep_json,
+          ],
+          link_with: libcommon_private,
+          install: false,
+          cpp_args: ['-w']
+  )
+  test('api', exe_api_test)
 endif

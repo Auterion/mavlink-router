@@ -23,6 +23,7 @@
 
 #include "common/log.h"
 
+#include "api/api_server.h"
 #include "binlog.h"
 #include "comm.h"
 #include "dedup.h"
@@ -39,6 +40,7 @@ struct Configuration {
     Log::Backend log_backend{Log::Backend::STDERR}; ///< CLI "syslog"
     unsigned long dedup_period_ms;                  ///< conf "DeduplicationPeriod"
     std::string command_pipe_path{""};
+    std::string api_socket_path{""}; ///< conf "APISocketPath"
 
     LogOptions log_config; ///< logging is in General config section, but internally an endpoint
     std::vector<UartEndpointConfig> uart_configs;
@@ -70,6 +72,8 @@ public:
 
     bool add_endpoints(const Configuration &config);
     void clear_endpoints();
+
+    const std::vector<std::shared_ptr<Endpoint>> &get_endpoints() const { return g_endpoints; };
 
     /*
      * Returns true, if the message was already received earlier
@@ -116,11 +120,14 @@ private:
     int g_tcp_fd = -1;      ///< for TCP server
     int g_commands_fd = -1; ///< for the named pipe commands endpoint
     std::string command_pipe_path = "";
+    std::string api_socket_path = "";
     std::shared_ptr<LogEndpoint> _log_endpoint{nullptr};
 
     Timeout *_timeouts = nullptr;
 
     Dedup _msg_dedup{0}; // disabled by default
+
+    std::shared_ptr<ApiServer> _api_server = nullptr;
 
     struct {
         uint32_t msg_to_unknown = 0;

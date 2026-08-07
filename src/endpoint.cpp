@@ -774,6 +774,17 @@ uint8_t Endpoint::get_trimmed_zeros(const mavlink_msg_entry_t *msg_entry,
     return msg_entry->max_msg_len - msg->payload_len;
 }
 
+std::vector<std::pair<uint8_t, uint8_t>> Endpoint::get_known_mav_components() const
+{
+    std::vector<std::pair<uint8_t, uint8_t>> components;
+
+    for (const auto &id : _sys_comp_ids) {
+        components.emplace_back(id >> 8, id & 0xff);
+    }
+
+    return components;
+}
+
 void Endpoint::log_aggregate(unsigned int interval_sec)
 {
     if (_incomplete_msgs > 0) {

@@ -442,6 +442,7 @@ static int parse_confs(ConfFile &conffile, Configuration &config)
         {"DeduplicationPeriod", false, ConfFile::parse_ul,          OPTIONS_TABLE_STRUCT_FIELD(Configuration, dedup_period_ms)},
         {"SnifferSysid",        false, ConfFile::parse_ul,          OPTIONS_TABLE_STRUCT_FIELD(Configuration, sniffer_sysid)},
         {"CommandPipePath",     false, ConfFile::parse_stdstring,   OPTIONS_TABLE_STRUCT_FIELD(Configuration, command_pipe_path)},
+        {"APISocketPath",       false, ConfFile::parse_stdstring,   OPTIONS_TABLE_STRUCT_FIELD(Configuration, api_socket_path)},
         {}
     };
     // clang-format on
