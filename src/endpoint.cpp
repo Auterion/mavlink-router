@@ -1473,8 +1473,9 @@ int UdpEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
-        log_trace("Dropping message, tx buffer full");
-        return 0;
+        _dropped_msgs++;
+        log_trace("UDP %s: Dropping message, tx buffer full", _name.c_str());
+        return -ENOBUFS;
     }
 
     // Append new data in the tx buffer
@@ -1932,8 +1933,9 @@ int TcpEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
-        log_trace("Dropping message, tx buffer full");
-        return 0;
+        _dropped_msgs++;
+        log_trace("TCP %s: Dropping message, tx buffer full", _name.c_str());
+        return -ENOBUFS;
     }
 
     // Append new data in the tx buffer
