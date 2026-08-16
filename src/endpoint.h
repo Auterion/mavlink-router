@@ -304,7 +304,7 @@ protected:
         } write;
     } _stat;
 
-    uint32_t _incomplete_msgs = 0;
+    uint32_t _dropped_msgs = 0;
     std::vector<uint16_t> _sys_comp_ids;
 
 private:
@@ -334,7 +334,7 @@ public:
     ~UartEndpoint() override = default;
 
     int write_msg(const struct buffer *pbuf) override;
-    int flush_pending_msgs() override { return -ENOSYS; }
+    int flush_pending_msgs() override;
 
     bool setup(UartEndpointConfig config); ///< open UART device and apply config
 
