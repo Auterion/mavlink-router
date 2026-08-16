@@ -1464,8 +1464,18 @@ ssize_t UdpEndpoint::_read_msg(uint8_t *buf, size_t len)
     return r;
 }
 
+bool UdpEndpoint::_has_peer() const
+{
+    return this->is_ipv6 ? sockaddr6.sin6_port != 0 : sockaddr.sin_port != 0;
+}
+
 int UdpEndpoint::write_msg(const struct buffer *pbuf)
 {
+    if (!_has_peer()) {
+        log_trace("UDP %s: No one ever connected to us. No one to write for", _name.c_str());
+        return 0;
+    }
+
     // We cannot add the new message to the coalescence or to the tx buffer -> send immediately what is scheduled
     if (tx_buf.len > 0 && tx_buf.len + pbuf->len > _coalesce_bytes) {
         log_trace("New message would overflow the coalescence, sending the pending ones before");
@@ -1535,19 +1545,17 @@ int UdpEndpoint::flush_pending_msgs()
         return -EINVAL;
     }
 
-    bool sock_connected = false;
     if (this->is_ipv6) {
         addrlen = sizeof(sockaddr6);
         sock = (struct sockaddr *)&sockaddr6;
-        sock_connected = sockaddr6.sin6_port != 0;
     } else {
         addrlen = sizeof(sockaddr);
         sock = (struct sockaddr *)&sockaddr;
-        sock_connected = sockaddr.sin_port != 0;
     }
 
-    if (!sock_connected) {
+    if (!_has_peer()) {
         log_trace("UDP %s: No one ever connected to us. No one to write for", _name.c_str());
+        tx_buf.len = 0;
         return 0;
     }
 

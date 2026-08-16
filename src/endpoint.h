@@ -385,6 +385,7 @@ protected:
     int open_ipv6(const char *ip, unsigned long port, UdpEndpointConfig::Mode mode);
 
     ssize_t _read_msg(uint8_t *buf, size_t len) override;
+    bool _has_peer() const;
 
     union {
         struct sockaddr_in v4;
