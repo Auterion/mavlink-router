@@ -224,7 +224,11 @@ Endpoint::~Endpoint()
 bool Endpoint::handle_canwrite()
 {
     int r = flush_pending_msgs();
-    return r == -EAGAIN;
+
+    // A short write leaves the rest of the backlog queued, so keep EPOLLOUT armed for it.
+    // If the flush ever returns 0 on a non-empty buffer, the fd stays writable,
+    // thus EPOLLOUT re-fires every iteration and we busy loop
+    return r == -EAGAIN || (r > 0 && tx_buf.len > 0);
 }
 
 int Endpoint::handle_read()

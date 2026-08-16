@@ -148,10 +148,10 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     int r = e->write_msg(buf);
 
     /*
-     * If endpoint would block, add EPOLLOUT event to get notified when it's
-     * possible to write again
+     * If the endpoint would block, or its tx buffer is already full, arm EPOLLOUT
+     * event to get notified when it's possible to write again
      */
-    if (r == -EAGAIN) {
+    if (r == -EAGAIN || r == -ENOBUFS) {
         mod_fd(e->fd, e.get(), EPOLLIN | EPOLLOUT);
     }
 
