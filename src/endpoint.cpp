@@ -780,14 +780,14 @@ uint8_t Endpoint::get_trimmed_zeros(const mavlink_msg_entry_t *msg_entry,
 
 void Endpoint::log_aggregate(unsigned int interval_sec)
 {
-    if (_incomplete_msgs > 0) {
-        log_warning("%s Endpoint [%d]%s: %u incomplete messages in the last %d seconds",
+    if (_dropped_msgs > 0) {
+        log_warning("%s Endpoint [%d]%s: %u dropped messages in the last %d seconds",
                     _type.c_str(),
                     fd,
                     _name.c_str(),
-                    _incomplete_msgs,
+                    _dropped_msgs,
                     interval_sec);
-        _incomplete_msgs = 0;
+        _dropped_msgs = 0;
     }
 }
 
@@ -1083,12 +1083,41 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
         return -EINVAL;
     }
 
-    /* TODO: send any pending data */
-    if (tx_buf.len > 0) {
-        ;
+    if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
+        _dropped_msgs++;
+        log_trace("UART %s: Dropping message, tx buffer full", _name.c_str());
+        return -ENOBUFS;
     }
 
-    ssize_t r = ::write(fd, pbuf->data, pbuf->len);
+    // Append to the tx buffer
+    memcpy(&tx_buf.data[tx_buf.len], pbuf->data, pbuf->len);
+    tx_buf.len += pbuf->len;
+
+    _stat.write.total++;
+
+    // Try to flush the buffer immediately, if it does not empty the buffer
+    // return -EAGAIN so the mainloop will arm EPOLLOUT
+    int ret = flush_pending_msgs();
+    if (ret > 0 && tx_buf.len > 0) {
+        return -EAGAIN;
+    }
+
+    return ret;
+}
+
+int UartEndpoint::flush_pending_msgs()
+{
+    if (tx_buf.len == 0) {
+        log_trace("No data in tx buffer, skipping write");
+        return 0;
+    }
+
+    if (fd < 0) {
+        log_error("UART %s: Trying to write invalid fd", _name.c_str());
+        return -EINVAL;
+    }
+
+    ssize_t r = ::write(fd, tx_buf.data, tx_buf.len);
     if (r == -1) {
         if (errno != EAGAIN) {
             log_error("UART %s: Error writing to uart (%m)", _name.c_str());
@@ -1096,19 +1125,13 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
         return -errno;
     }
 
-    _stat.write.total++;
-    _stat.write.bytes += pbuf->len;
+    _stat.write.bytes += r;
 
-    /* Incomplete packet, we warn and discard the rest */
-    if (r != (ssize_t)pbuf->len) {
-        _incomplete_msgs++;
-        log_debug("UART %s: Discarding packet, incomplete write %zd but len=%u",
-                  _name.c_str(),
-                  r,
-                  pbuf->len);
-    }
+    tx_buf.len = std::max(ssize_t(0), (ssize_t)tx_buf.len - r);
+    // memcpy isn't safe for overlapping regions
+    memmove(tx_buf.data, &tx_buf.data[r], tx_buf.len);
 
-    log_trace("UART [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    log_trace("UART [%d]%s: Wrote %zd bytes, %u pending", fd, _name.c_str(), r, tx_buf.len);
 
     return r;
 }
