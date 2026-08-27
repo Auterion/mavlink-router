@@ -199,6 +199,8 @@ public:
 
     void update_throttle_info(const struct buffer *pbuf);
 
+    void count_dropped_msg() { _dropped_msgs++; }
+
     void filter_add_allowed_out_msg_id(uint32_t msg_id)
     {
         _allowed_outgoing_msg_ids.push_back(msg_id);

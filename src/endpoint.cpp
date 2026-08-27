@@ -1079,7 +1079,6 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
-        _dropped_msgs++;
         log_trace("UART %s: Dropping message, tx buffer full", _name.c_str());
         return -ENOBUFS;
     }
@@ -1478,7 +1477,6 @@ int UdpEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
-        _dropped_msgs++;
         log_trace("UDP %s: Dropping message, tx buffer full", _name.c_str());
         return -ENOBUFS;
     }
@@ -1936,7 +1934,6 @@ int TcpEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
-        _dropped_msgs++;
         log_trace("TCP %s: Dropping message, tx buffer full", _name.c_str());
         return -ENOBUFS;
     }
