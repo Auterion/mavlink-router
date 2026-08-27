@@ -48,8 +48,9 @@
 
 #include "mainloop.h"
 
-#define RX_BUF_MAX_SIZE (MAVLINK_MAX_PACKET_LEN * 4)
-#define TX_BUF_MAX_SIZE (8U * 1024U)
+#define RX_BUF_MAX_SIZE    (MAVLINK_MAX_PACKET_LEN * 4)
+#define TX_BUF_MAX_SIZE    (8U * 1024U)
+#define MSG_CACHE_MAX_SIZE (2048U)
 
 #define UART_BAUD_RETRY_SEC 5
 
@@ -75,6 +76,7 @@ const ConfFile::OptionsTable UartEndpoint::option_table[] = {
     {"BlockSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, block_src_sys_in)},
     {"group",           false, ConfFile::parse_stdstring,       OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, group)},
     {"MsgThrottling",   false, ConfFile::parse_pair_vector,     OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, message_throttling)},
+    {"ThrottleCache",   false, ConfFile::parse_uint32_vector,   OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, throttle_cache)},
     {}
 };
 
@@ -101,6 +103,7 @@ const ConfFile::OptionsTable UdpEndpoint::option_table[] = {
     {"CoalesceMs",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_ms)},
     {"CoalesceNoDelay", false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, coalesce_nodelay)},
     {"MsgThrottling",   false,  ConfFile::parse_pair_vector,    OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, message_throttling)},
+    {"ThrottleCache",   false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, throttle_cache)},
     {}
 };
 
@@ -126,6 +129,7 @@ const ConfFile::OptionsTable TcpEndpoint::option_table[] = {
     {"CoalesceMs",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, coalesce_ms)},
     {"CoalesceNoDelay", false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, coalesce_nodelay)},
     {"MsgThrottling",   false,  ConfFile::parse_pair_vector,    OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, message_throttling)},
+    {"ThrottleCache",   false,  ConfFile::parse_uint32_vector,  OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, throttle_cache)},
     {}
 };
 // clang-format on
@@ -597,24 +601,39 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
         return Endpoint::AcceptState::Rejected;
     }
 
-    // If throttling is enabled and message is too frequent
-    if (is_throttling_enabled(pbuf) && should_throttle_msg(pbuf)) {
-        return Endpoint::AcceptState::Throttled;
+    // Check throttling rules if enabled
+    if (is_throttling_enabled(pbuf)) {
+        const bool should_be_cached = _throttle_cache_msg_ids.count(pbuf->curr.msg_id) != 0;
+
+        if (should_throttle_msg(pbuf)) {
+            // Message is too frequent. Cache it if we must not lose it, otherwise discard it
+            return should_be_cached ? Endpoint::AcceptState::Cached
+                                    : Endpoint::AcceptState::Throttled;
+        }
+
+        // Due for sending but we append it to the cache anyways to maintain ordering
+        if (should_be_cached && has_cached_msg_id(pbuf->curr.msg_id)) {
+            return Endpoint::AcceptState::Cached;
+        }
     }
 
     return Endpoint::AcceptState::Accepted;
 }
 
-bool Endpoint::is_throttling_enabled(const struct buffer *pbuf) const
+bool Endpoint::is_throttling_enabled(uint32_t msg_id) const
 {
     // Check if message throttling is enabled for such message id
-    return pbuf->curr.msg_id != UINT32_MAX && !_message_throttle_map.empty()
-        && _message_throttle_map.count(pbuf->curr.msg_id);
+    return msg_id != UINT32_MAX && !_message_throttle_map.empty()
+        && _message_throttle_map.count(msg_id);
 }
 
-bool Endpoint::should_throttle_msg(const struct buffer *pbuf) const
+bool Endpoint::should_throttle_msg(uint32_t msg_id) const
 {
-    const throttle_info &thr_info = _message_throttle_map.at(pbuf->curr.msg_id);
+    const auto entry = _message_throttle_map.find(msg_id);
+    if (entry == _message_throttle_map.end())
+        return false; // not throttled
+
+    const throttle_info &thr_info = entry->second;
     if (thr_info.rate < FLT_EPSILON)
         return false; // invalid rate or throttling disabled
 
@@ -625,9 +644,13 @@ bool Endpoint::should_throttle_msg(const struct buffer *pbuf) const
     return false;
 }
 
-void Endpoint::update_throttle_info(const struct buffer *pbuf)
+void Endpoint::update_throttle_info(uint32_t msg_id)
 {
-    throttle_info &thr_info = _message_throttle_map.at(pbuf->curr.msg_id);
+    const auto entry = _message_throttle_map.find(msg_id);
+    if (entry == _message_throttle_map.end())
+        return; // not throttled, no timestamp to advance
+
+    throttle_info &thr_info = entry->second;
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::duration<float>(1.f / thr_info.rate));
@@ -639,6 +662,149 @@ void Endpoint::update_throttle_info(const struct buffer *pbuf)
 
     // Compute next timestamp
     thr_info.next_timestamp += period;
+}
+
+void Endpoint::throttle_cache_add_msg_id(uint32_t msg_id)
+{
+    // Caching only makes sense for a throttled message, warn the user.
+    if (!is_throttling_enabled(msg_id)) {
+        log_warning("%s Endpoint %s: ThrottleCache for message ID %u has no effect until message "
+                    "throttling is enabled for it",
+                    _type.c_str(),
+                    _name.c_str(),
+                    msg_id);
+    }
+
+    _throttle_cache_msg_ids.insert(msg_id);
+}
+
+void Endpoint::cache_msg(const struct buffer *pbuf)
+{
+    // Cache full, drop the newest message so the already-queued backlog is preserved.
+    if (cache_size() >= MSG_CACHE_MAX_SIZE) {
+        _msg_cache_dropped++;
+        return;
+    }
+
+    // Append the message to the queue of its own msg_id
+    _msg_cache[pbuf->curr.msg_id].emplace_back(*pbuf);
+
+    log_debug("Endpoint %s: caching message of type %u [cache size = %zu]",
+              get_name().c_str(),
+              pbuf->curr.msg_id,
+              cache_size());
+}
+
+int Endpoint::resend_queued_msgs(uint32_t msg_id, std::deque<CachedMsg> &queue)
+{
+    while (!queue.empty()) {
+        if (should_throttle_msg(msg_id)) {
+            // not due yet
+            return 0;
+        }
+
+        struct buffer buf = queue.front().as_buffer();
+
+        log_debug("Endpoint %s: resending cached message of type %u [queued = %zu]",
+                  get_name().c_str(),
+                  msg_id,
+                  queue.size());
+
+        // Enough time has passed since last message so we can re-send it
+        const int r = write_msg(&buf);
+
+        //  The write can tear the connection down, let the caller re-check the fd
+        if (fd < 0) {
+            return r;
+        }
+
+        // If write_msg returns -ENOBUFS, it means the message was not copied to the tx_buf thus
+        // we do not remove it from the queue and will retry later
+        if (r == -ENOBUFS) {
+            log_debug("Endpoint %s: cached message of type %u not accepted (%d), retrying later",
+                      get_name().c_str(),
+                      msg_id,
+                      r);
+            return r;
+        }
+
+        update_throttle_info(msg_id);
+        queue.pop_front();
+
+        if (r < 0) {
+            return r; // congested link or hang-up
+        }
+    }
+
+    return 0;
+}
+
+std::chrono::steady_clock::time_point Endpoint::next_resend_deadline() const
+{
+    auto earliest = std::chrono::steady_clock::time_point::max();
+
+    for (const auto &queue : _msg_cache) {
+        const auto entry = _message_throttle_map.find(queue.first);
+
+        // If un-throttled at runtime, the whole queue will drain on the next pass
+        if (entry == _message_throttle_map.end()) {
+            return std::chrono::steady_clock::time_point::min();
+        }
+
+        earliest = std::min(earliest, entry->second.next_timestamp);
+    }
+
+    return earliest;
+}
+
+void Endpoint::resend_cached_msgs()
+{
+    if (_msg_cache.empty()) {
+        return;
+    }
+
+    if (fd < 0) {
+        // The connection is gone, drop the cache
+        _msg_cache.clear();
+        return;
+    }
+
+    for (auto it = _msg_cache.begin(); it != _msg_cache.end();) {
+        const int r = resend_queued_msgs(it->first, it->second);
+
+        // The write can tear the connection down, re-check the fd
+        if (fd < 0) {
+            _msg_cache.clear();
+            if (r == -EPIPE) {
+                // only TCP endpoints should return -EPIPE
+                Mainloop::get_instance().should_process_tcp_hangups = true;
+            }
+            return;
+        }
+
+        // Drop drained queues
+        if (it->second.empty()) {
+            it = _msg_cache.erase(it);
+        } else {
+            ++it;
+        }
+
+        if (r == 0) {
+            // ran dry or not due yet
+            continue;
+        }
+
+        // Congested link or hang-up. Stop draining so the remaining messages keep their
+        // order; EPOLLOUT clears the tx buffer and the resend timer retries after that.
+        if (r == -EAGAIN || r == -ENOBUFS) {
+            // If write would block, add EPOLLOUT event to get notified when it's possible to write again
+            Mainloop::get_instance().mod_fd(fd, this, EPOLLIN | EPOLLOUT);
+        } else if (r == -EPIPE) {
+            // only TCP endpoints should return -EPIPE
+            Mainloop::get_instance().should_process_tcp_hangups = true;
+        }
+        return;
+    }
 }
 
 bool Endpoint::allowed_by_dedup(const buffer *buf) const
@@ -784,6 +950,18 @@ void Endpoint::log_aggregate(unsigned int interval_sec)
                     interval_sec);
         _dropped_msgs = 0;
     }
+    if (_msg_cache_dropped > 0) {
+        log_warning("%s Endpoint [%d]%s: throttle cache full (%zu/%u), %u messages dropped in "
+                    "the last %d seconds",
+                    _type.c_str(),
+                    fd,
+                    _name.c_str(),
+                    cache_size(),
+                    MSG_CACHE_MAX_SIZE,
+                    _msg_cache_dropped,
+                    interval_sec);
+        _msg_cache_dropped = 0;
+    }
 }
 
 UartEndpoint::UartEndpoint(std::string name)
@@ -866,6 +1044,10 @@ bool UartEndpoint::setup(UartEndpointConfig conf)
 
         uint32_t msg_id = static_cast<uint32_t>(throttle_cfg.first);
         this->set_message_throttling(msg_id, throttle_cfg.second);
+    }
+
+    for (auto msg_id : conf.throttle_cache) {
+        this->throttle_cache_add_msg_id(msg_id);
     }
 
     return true;
@@ -1258,6 +1440,10 @@ bool UdpEndpoint::setup(UdpEndpointConfig conf)
         this->set_message_throttling(msg_id, throttle_cfg.second);
     }
 
+    for (auto msg_id : conf.throttle_cache) {
+        this->throttle_cache_add_msg_id(msg_id);
+    }
+
     return true;
 }
 
@@ -1478,6 +1664,7 @@ int UdpEndpoint::write_msg(const struct buffer *pbuf)
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
         log_trace("UDP %s: Dropping message, tx buffer full", _name.c_str());
+        // Not queued anywhere, the caller still owns pbuf and may retry it later
         return -ENOBUFS;
     }
 
@@ -1641,6 +1828,11 @@ Endpoint::AcceptState UdpEndpoint::accept_msg(const struct buffer *pbuf) const
         return Endpoint::AcceptState::Filtered;
     }
 
+    // reject when there is no peer to send to
+    if (!_has_peer()) {
+        return Endpoint::AcceptState::Rejected;
+    }
+
     // otherwise: refer to standard accept rules
     return Endpoint::accept_msg(pbuf);
 }
@@ -1739,6 +1931,10 @@ bool TcpEndpoint::setup(TcpEndpointConfig conf)
 
         uint32_t msg_id = static_cast<uint32_t>(throttle_cfg.first);
         this->set_message_throttling(msg_id, throttle_cfg.second);
+    }
+
+    for (auto msg_id : conf.throttle_cache) {
+        this->throttle_cache_add_msg_id(msg_id);
     }
 
     if (!this->open(conf.address, conf.port)) {
@@ -1935,6 +2131,7 @@ int TcpEndpoint::write_msg(const struct buffer *pbuf)
 
     if (tx_buf.len + pbuf->len > TX_BUF_MAX_SIZE) {
         log_trace("TCP %s: Dropping message, tx buffer full", _name.c_str());
+        // Not queued anywhere: the caller still owns pbuf and may retry it later
         return -ENOBUFS;
     }
 
@@ -2058,6 +2255,7 @@ void TcpEndpoint::close()
     }
 
     fd = -1;
+    tx_buf.len = 0;
 }
 
 bool TcpEndpoint::validate_config(const TcpEndpointConfig &config)

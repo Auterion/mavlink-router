@@ -224,6 +224,15 @@
 # Default: Empty (no message throttling)
 #MsgThrottling =
 
+# List of throttled messages which must be queued and re-sent later instead of
+# being dropped by the throttling mechanism. Only has an effect for message IDs
+# which are also listed in `MsgThrottling`.
+# Intended for messages which cannot be lost and arrive in finite bursts, like
+# parameters or MAVFTP. Do NOT use it for telemetry: see the readme for why.
+# Format: Comma separated list of integers
+# Default: Empty (throttled messages are dropped)
+#ThrottleCache =
+
 ## Example
 [UartEndpoint alpha]
 Device = /dev/ttyS0

@@ -111,6 +111,7 @@ public:
 
 private:
     static const unsigned int LOG_AGGREGATE_INTERVAL_SEC = 5;
+    static const unsigned int RESEND_RETRY_MS = 10; // retry cadence while a write is refused
 
     std::vector<std::shared_ptr<Endpoint>> g_endpoints{};
     int g_tcp_fd = -1;      ///< for TCP server
@@ -119,6 +120,9 @@ private:
     std::shared_ptr<LogEndpoint> _log_endpoint{nullptr};
 
     Timeout *_timeouts = nullptr;
+
+    bool _resend_scheduled = false;
+    Timeout *_resend_timer = nullptr;
 
     Dedup _msg_dedup{0}; // disabled by default
 
@@ -134,6 +138,9 @@ private:
     void _del_timeouts();
     bool _retry_timeout_cb(void *data);
     bool _log_aggregate_timeout(void *data);
+    void schedule_resend();
+    bool _reschedule_resend();
+    bool _resend_timeout(void *data);
 
     Mainloop() = default;
     Mainloop(const Mainloop &) = delete;

@@ -22,6 +22,8 @@
 
 #include <cfloat>
 #include <chrono>
+#include <deque>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -59,6 +61,7 @@ struct UartEndpointConfig {
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
     std::vector<std::pair<float, float>> message_throttling;
+    std::vector<uint32_t> throttle_cache;
 };
 
 struct UdpEndpointConfig {
@@ -85,6 +88,7 @@ struct UdpEndpointConfig {
     unsigned long coalesce_ms;
     std::vector<uint32_t> coalesce_nodelay;
     std::vector<std::pair<float, float>> message_throttling;
+    std::vector<uint32_t> throttle_cache;
 };
 
 struct TcpEndpointConfig {
@@ -109,6 +113,7 @@ struct TcpEndpointConfig {
     unsigned long coalesce_ms;
     std::vector<uint32_t> coalesce_nodelay;
     std::vector<std::pair<float, float>> message_throttling;
+    std::vector<uint32_t> throttle_cache;
 };
 
 /*
@@ -148,6 +153,35 @@ struct _packed_ mavlink_router_mavlink1_header {
     uint8_t msgid;
 };
 
+class CachedMsg {
+public:
+    explicit CachedMsg(const struct buffer &buf)
+        : _data(buf.data, buf.data + buf.len)
+        , _curr(buf.curr)
+        , _payload_ofs(buf.curr.payload != nullptr ? (unsigned int)(buf.curr.payload - buf.data)
+                                                   : 0)
+    {
+    }
+
+    /** A view onto the owned bytes, valid as long as this CachedMsg is */
+    struct buffer as_buffer()
+    {
+        struct buffer buf = {};
+
+        buf.data = _data.data();
+        buf.len = _data.size();
+        buf.curr = _curr;
+        buf.curr.payload = _data.data() + _payload_ofs;
+
+        return buf;
+    }
+
+private:
+    std::vector<uint8_t> _data;
+    buffer::msg_info _curr;
+    unsigned int _payload_ofs;
+};
+
 class Endpoint : public Pollable {
 public:
     /*
@@ -166,6 +200,7 @@ public:
         Filtered,
         Rejected,
         Throttled,
+        Cached,
     };
 
     Endpoint(std::string type, std::string name);
@@ -193,13 +228,35 @@ public:
 
     AcceptState virtual accept_msg(const struct buffer *pbuf) const;
 
-    bool is_throttling_enabled(const struct buffer *pbuf) const;
+    bool is_throttling_enabled(uint32_t msg_id) const;
+    bool is_throttling_enabled(const struct buffer *pbuf) const
+    {
+        return is_throttling_enabled(pbuf->curr.msg_id);
+    }
 
-    bool should_throttle_msg(const struct buffer *pbuf) const;
+    bool should_throttle_msg(uint32_t msg_id) const;
+    bool should_throttle_msg(const struct buffer *pbuf) const
+    {
+        return should_throttle_msg(pbuf->curr.msg_id);
+    }
 
-    void update_throttle_info(const struct buffer *pbuf);
+    void update_throttle_info(uint32_t msg_id);
+    void update_throttle_info(const struct buffer *pbuf)
+    {
+        update_throttle_info(pbuf->curr.msg_id);
+    }
+
+    void cache_msg(const struct buffer *pbuf);
+
+    std::chrono::steady_clock::time_point next_resend_deadline() const;
+
+    void resend_cached_msgs();
 
     void count_dropped_msg() { _dropped_msgs++; }
+
+    bool has_cached_msgs() const { return !_msg_cache.empty(); }
+
+    bool has_cached_msg_id(uint32_t msg_id) const { return _msg_cache.count(msg_id) != 0; }
 
     void filter_add_allowed_out_msg_id(uint32_t msg_id)
     {
@@ -259,6 +316,8 @@ public:
         }
     }
 
+    void throttle_cache_add_msg_id(uint32_t msg_id);
+
     bool allowed_by_dedup(const buffer *pbuf) const;
     bool allowed_by_incoming_filters(const struct buffer *pbuf) const;
 
@@ -307,9 +366,21 @@ protected:
     } _stat;
 
     uint32_t _dropped_msgs = 0;
+    uint32_t _msg_cache_dropped = 0;
     std::vector<uint16_t> _sys_comp_ids;
 
 private:
+    size_t cache_size() const
+    {
+        size_t total = 0;
+        for (const auto &queue : _msg_cache) {
+            total += queue.second.size();
+        }
+        return total;
+    }
+
+    int resend_queued_msgs(uint32_t msg_id, std::deque<CachedMsg> &queue);
+
     std::vector<uint32_t> _allowed_outgoing_msg_ids;
     std::vector<uint32_t> _blocked_outgoing_msg_ids;
     std::vector<uint8_t> _allowed_outgoing_src_comps;
@@ -324,10 +395,12 @@ private:
     std::vector<uint8_t> _blocked_incoming_src_systems;
 
     typedef struct {
-        float rate;
+        float rate = 0.f;
         std::chrono::steady_clock::time_point next_timestamp = std::chrono::steady_clock::now();
     } throttle_info;
     std::unordered_map<uint32_t, throttle_info> _message_throttle_map;
+    std::map<uint32_t, std::deque<CachedMsg>> _msg_cache;
+    std::set<uint32_t> _throttle_cache_msg_ids{};
 };
 
 class UartEndpoint : public Endpoint {
