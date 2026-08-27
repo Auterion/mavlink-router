@@ -1295,9 +1295,14 @@ int UartEndpoint::flush_pending_msgs()
 
     ssize_t r = ::write(fd, tx_buf.data, tx_buf.len);
     if (r == -1) {
-        if (errno != EAGAIN) {
-            log_error("UART %s: Error writing to uart (%m)", _name.c_str());
+        if (errno == EAGAIN) {
+            return -EAGAIN; // the fd is just busy, EPOLLOUT will retry
         }
+
+        log_error("UART %s: Error writing to uart (%m)", _name.c_str());
+
+        tx_buf.len = 0;
+
         return -errno;
     }
 
@@ -1741,9 +1746,18 @@ int UdpEndpoint::flush_pending_msgs()
 
     ssize_t r = ::sendto(fd, tx_buf.data, tx_buf.len, 0, sock, addrlen);
     if (r == -1) {
-        if (errno != EAGAIN && errno != ECONNREFUSED && errno != ENETUNREACH) {
+        if (errno == EAGAIN) {
+            return -EAGAIN; // the socket is just busy, EPOLLOUT will retry
+        }
+
+        // An absent peer (ECONNREFUSED) or a link that is down (ENETUNREACH) is
+        // expected and stays quiet
+        if (errno != ECONNREFUSED && errno != ENETUNREACH) {
             log_error("UDP %s: Error sending udp packet (%m)", _name.c_str());
         }
+
+        tx_buf.len = 0;
+
         return -errno;
     };
 
@@ -2208,9 +2222,15 @@ int TcpEndpoint::flush_pending_msgs()
 
     ssize_t r = ::sendto(fd, tx_buf.data, tx_buf.len, 0, sock, addrlen);
     if (r == -1) {
-        if (errno != EAGAIN && errno != ECONNREFUSED) {
+        if (errno == EAGAIN) {
+            return -EAGAIN; // the socket is just busy, EPOLLOUT will retry
+        }
+
+        if (errno != ECONNREFUSED) {
             log_error("TCP %s: Error sending tcp packet (%m)", _name.c_str());
         }
+        tx_buf.len = 0;
+
         if (errno == EPIPE) {
             if (_retry_timeout > 0) {
                 this->_schedule_reconnect();
