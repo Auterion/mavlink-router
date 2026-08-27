@@ -147,6 +147,10 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
 {
     int r = e->write_msg(buf);
 
+    if (r == -ENOBUFS) {
+        e->count_dropped_msg();
+    }
+
     /*
      * If the endpoint would block, or its tx buffer is already full, arm EPOLLOUT
      * event to get notified when it's possible to write again
