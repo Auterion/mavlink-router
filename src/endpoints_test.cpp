@@ -23,7 +23,13 @@
 #include "tlog.h"
 #include "ulog.h"
 
+#include <fcntl.h>
 #include <limits.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <deque>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -512,6 +518,135 @@ TEST(EndpointTest, BlockMsg_InSysFilter)
     EXPECT_EQ(endpoint.allowed_by_incoming_filters(&test_msg), true);
     test_msg.curr.src_sysid = 255;
     EXPECT_EQ(endpoint.allowed_by_incoming_filters(&test_msg), true);
+}
+
+/**
+ * Throttle cache
+ */
+
+// Endpoint with scripted write_msg() results, recording what it has been asked to write
+class CacheTestEndpoint : public Endpoint {
+public:
+    CacheTestEndpoint()
+        : Endpoint{"Test", "cache"}
+    {
+        fd = 0; // resend_cached_msgs() skips endpoints without a file descriptor
+    }
+    ~CacheTestEndpoint() override{};
+
+    int write_msg(const struct buffer *pbuf) override
+    {
+        written.push_back(pbuf->curr.msg_id);
+
+        if (results.empty()) {
+            return pbuf->len; // written out
+        }
+
+        const int r = results.front();
+        results.pop_front();
+        return r;
+    }
+    int flush_pending_msgs() override { return -ENOSYS; }
+    ssize_t _read_msg(uint8_t *buf, size_t len) override { return 0; };
+
+    std::deque<int> results{};       ///< scripted write_msg() return values
+    std::vector<uint32_t> written{}; ///< msg_ids write_msg() has been called with
+};
+
+class ThrottleCacheTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        Mainloop::init();
+
+        _msg.data = _storage;
+        _msg.len = sizeof(_storage);
+        _msg.curr.msg_id = TEST_MSG_ID;
+        _msg.curr.src_sysid = 1;
+        _msg.curr.src_compid = 1;
+        _msg.curr.target_sysid = -1;
+        _msg.curr.target_compid = -1;
+        _msg.curr.payload = _storage + 10;
+        _msg.curr.payload_len = 4;
+    }
+    void TearDown() override { Mainloop::teardown(); }
+
+    static const uint32_t TEST_MSG_ID = 30;
+
+    uint8_t _storage[32] = {};
+    buffer _msg = {};
+};
+
+// A message the endpoint refused (tx buffer full) must stay cached, not be silently dropped
+TEST_F(ThrottleCacheTest, RefusedMsgIsKeptForRetry)
+{
+    CacheTestEndpoint endpoint;
+
+    endpoint.cache_msg(&_msg);
+    ASSERT_TRUE(endpoint.has_cached_msgs());
+
+    endpoint.results.push_back(-ENOBUFS);
+    endpoint.resend_cached_msgs();
+    EXPECT_EQ(endpoint.written.size(), 1u);
+    EXPECT_TRUE(endpoint.has_cached_msgs()); // not taken by the endpoint: keep it
+
+    // next tick the tx buffer has room again
+    endpoint.resend_cached_msgs();
+    EXPECT_EQ(endpoint.written.size(), 2u);
+    EXPECT_FALSE(endpoint.has_cached_msgs());
+}
+
+// -EAGAIN means "queued in tx_buf, not yet flushed": keeping the cached copy around would
+// put the message on the link twice
+TEST_F(ThrottleCacheTest, DoesNotDuplicateOnEagain)
+{
+    CacheTestEndpoint endpoint;
+
+    endpoint.cache_msg(&_msg);
+    endpoint.results.push_back(-EAGAIN);
+
+    endpoint.resend_cached_msgs();
+    EXPECT_EQ(endpoint.written.size(), 1u);
+    EXPECT_FALSE(endpoint.has_cached_msgs());
+
+    endpoint.resend_cached_msgs();
+    EXPECT_EQ(endpoint.written.size(), 1u); // not written a second time
+}
+
+// A message which became due again must not overtake older ones still queued in the cache
+TEST_F(ThrottleCacheTest, AcceptMsgKeepsCachedBacklogInOrder)
+{
+    CacheTestEndpoint endpoint;
+
+    endpoint.set_message_throttling(TEST_MSG_ID, 1.0f); // 1 Hz
+    endpoint.throttle_cache_add_msg_id(TEST_MSG_ID);
+
+    // first message is due and nothing is cached yet
+    EXPECT_EQ(endpoint.accept_msg(&_msg), Endpoint::AcceptState::Accepted);
+    endpoint.update_throttle_info(&_msg);
+
+    // second one arrives within the throttling period
+    EXPECT_EQ(endpoint.accept_msg(&_msg), Endpoint::AcceptState::Cached);
+    endpoint.cache_msg(&_msg);
+
+    // re-arm the throttling entry to simulate the period having elapsed
+    endpoint.set_message_throttling(TEST_MSG_ID, 0.0f);
+    endpoint.set_message_throttling(TEST_MSG_ID, 1.0f);
+
+    // due again, but the older message is still queued: this one goes behind it
+    EXPECT_EQ(endpoint.accept_msg(&_msg), Endpoint::AcceptState::Cached);
+}
+
+// Without caching enabled for the msg_id, a throttled message is still discarded
+TEST_F(ThrottleCacheTest, ThrottledMsgWithoutCachingIsDiscarded)
+{
+    CacheTestEndpoint endpoint;
+
+    endpoint.set_message_throttling(TEST_MSG_ID, 1.0f);
+
+    EXPECT_EQ(endpoint.accept_msg(&_msg), Endpoint::AcceptState::Accepted);
+    endpoint.update_throttle_info(&_msg);
+    EXPECT_EQ(endpoint.accept_msg(&_msg), Endpoint::AcceptState::Throttled);
 }
 
 /**

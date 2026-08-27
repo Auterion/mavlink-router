@@ -25,7 +25,9 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <sstream>
 
@@ -69,6 +71,9 @@ Mainloop &Mainloop::init()
 
 void Mainloop::teardown()
 {
+    _instance._resend_scheduled = false;
+    _instance._resend_timer = nullptr;
+
     _initialized = false;
 }
 
@@ -209,6 +214,20 @@ void Mainloop::route_msg(struct buffer *buf)
                 buf->curr.target_compid,
                 buf->curr.src_sysid,
                 buf->curr.src_compid);
+            unknown = false;
+            break;
+        case Endpoint::AcceptState::Cached:
+            // Critical messages are cached and relayed slowly to avoid drops during throttling
+            e->cache_msg(buf);
+            schedule_resend();
+
+            log_trace("Endpoint [%d] cached message %u to %d/%d from %u/%u for throttling reasons",
+                      e->fd,
+                      buf->curr.msg_id,
+                      buf->curr.target_sysid,
+                      buf->curr.target_compid,
+                      buf->curr.src_sysid,
+                      buf->curr.src_compid);
             unknown = false;
             break;
         case Endpoint::AcceptState::Rejected:
@@ -580,6 +599,9 @@ int Mainloop::loop()
         delete current;
     }
 
+    _resend_scheduled = false;
+    _resend_timer = nullptr;
+
     return _retcode;
 }
 
@@ -791,6 +813,75 @@ void Mainloop::clean_command_pipe()
         g_commands_fd = -1;
     }
     ::remove(command_pipe_path.c_str());
+}
+
+void Mainloop::schedule_resend()
+{
+    if (!_resend_scheduled) {
+        _resend_timer
+            = add_timeout(RESEND_RETRY_MS,
+                          std::bind(&Mainloop::_resend_timeout, this, std::placeholders::_1),
+                          this);
+        if (_resend_timer == nullptr) {
+            return;
+        }
+        _resend_scheduled = true;
+    }
+
+    // The message just cached may be due sooner than whatever the timer is waiting for
+    _reschedule_resend();
+}
+
+bool Mainloop::_reschedule_resend()
+{
+    // Re-arm the resend timer for the earliest cached deadline across all endpoints.
+    auto earliest = std::chrono::steady_clock::time_point::max();
+
+    for (const auto &e : g_endpoints) {
+        if (e->has_cached_msgs()) {
+            earliest = std::min(earliest, e->next_resend_deadline());
+        }
+    }
+
+    if (earliest == std::chrono::steady_clock::time_point::max()) {
+        // nothing cached anywhere
+        return false;
+    }
+
+    uint32_t delay_ms;
+    const auto now = std::chrono::steady_clock::now();
+
+    if (earliest <= now) {
+        // The message is overdue, but the endpoint cannot accept it yet. Keep retrying at a fixed cadence.
+        delay_ms = RESEND_RETRY_MS;
+    } else {
+        // Round up, truncating can wake us before the message is due.
+        const auto nsec
+            = std::chrono::duration_cast<std::chrono::nanoseconds>(earliest - now).count();
+        const uint64_t msec = ((uint64_t)nsec + NSEC_PER_MSEC - 1) / NSEC_PER_MSEC;
+        delay_ms = (uint32_t)std::min<uint64_t>(std::max<uint64_t>(msec, 1), UINT32_MAX);
+    }
+    mod_timeout(_resend_timer, delay_ms);
+
+    return true;
+}
+
+bool Mainloop::_resend_timeout(void *data)
+{
+    (void)data;
+
+    for (const auto &e : g_endpoints) {
+        e->resend_cached_msgs();
+    }
+
+    if (!_reschedule_resend()) {
+        // Nothing left to resend, _del_timeouts will clean up the timer
+        _resend_scheduled = false;
+        _resend_timer = nullptr;
+        return false;
+    }
+
+    return true;
 }
 
 Timeout *Mainloop::add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb,

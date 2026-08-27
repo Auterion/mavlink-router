@@ -282,6 +282,35 @@ Message throttling:
     To do this, it is sufficient to specify in the config file the list of
     `<msg_id>,<rate>` pairs under the desired endpoints settings.
 
+Message throttling cache:
+
+  - Throttling drops the messages it holds back. For a few message types that
+    loss is not acceptable, so the message IDs listed under `ThrottleCache` are
+    queued instead of dropped, and re-sent later at the rate configured in
+    `MsgThrottling`. Messages of the same ID are delivered in arrival order.  
+    The option only has an effect for message IDs which are **also** listed in
+    `MsgThrottling`: listing an ID which isn't throttled does nothing.
+  - The cache holds up to 2048 messages per endpoint. Beyond that the newest
+    message is dropped and the loss is reported in the aggregated log output.
+    There is no age limit: a queued message waits for as long as it takes to be
+    sent.
+  - **Use this only for messages which must not be lost and which arrive in
+    finite bursts**, such as `PARAM_VALUE`/`PARAM_SET` during a parameter
+    download, `FILE_TRANSFER_PROTOCOL` (MAVFTP) or mission item transfers.
+    Those are request/response or windowed protocols: the burst ends, the cache
+    drains, and the receiver gets every message it was promised.
+  - **Do not use it for telemetry.** Throttling exists in the first place
+    because the endpoint cannot take the full rate. Caching a stream whose
+    _sustained_ rate is above the throttle rate turns the cache into a queue
+    which only grows: it fills up to the limit and from then on delivers an
+    ever-lagging replay of old data while discarding the new. For messages like
+    `ATTITUDE` or `GLOBAL_POSITION_INT` a late value is worse than no value —
+    what matters is the freshest sample, which is exactly what plain
+    `MsgThrottling` already delivers.
+  - Rule of thumb: cache a message ID only if its long-term average rate is
+    below the configured throttle rate. The cache is there to absorb bursts, it
+    cannot absorb a sustained overload.
+
 Endpoint groups:
 
   - Multiple endpoints can be configured to be in the same endpoin group.

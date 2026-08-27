@@ -32,7 +32,7 @@ struct buffer {
      * Data relevant for the last parsed msg available on this buffer,
      * copied from @data when we have a complete header
      */
-    struct {
+    struct msg_info {
         uint32_t msg_id;
         int target_sysid;
         int target_compid;
