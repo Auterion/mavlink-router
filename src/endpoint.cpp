@@ -579,35 +579,30 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
         return Endpoint::AcceptState::Filtered;
     }
 
+    // Determine whether this endpoint is a routing target for the message
+    const bool accepted =
+        // Message is broadcast on sysid or target sysid is non-existent
+        (pbuf->curr.target_sysid == 0 || pbuf->curr.target_sysid == -1)
+        // This endpoint has the target of message (sys and comp id)
+        || (pbuf->curr.target_compid > 0
+            && has_sys_comp_id(pbuf->curr.target_sysid, pbuf->curr.target_compid))
+        // This endpoint has the target sysid, and the target compid is broadcast or non-existent
+        || ((pbuf->curr.target_compid == 0 || pbuf->curr.target_compid == -1)
+            && has_sys_id(pbuf->curr.target_sysid))
+        // This endpoint has the sniffer_sysid
+        || ((sniffer_sysid != 0) && has_sys_id(sniffer_sysid));
+
+    // Reject everything this endpoint is not a target for
+    if (!accepted) {
+        return Endpoint::AcceptState::Rejected;
+    }
+
     // If throttling is enabled and message is too frequent
     if (is_throttling_enabled(pbuf) && should_throttle_msg(pbuf)) {
         return Endpoint::AcceptState::Throttled;
     }
 
-    // Message is broadcast on sysid or sysid is non-existent: accept msg
-    if (pbuf->curr.target_sysid == 0 || pbuf->curr.target_sysid == -1) {
-        return Endpoint::AcceptState::Accepted;
-    }
-
-    // This endpoint has the target of message (sys and comp id): accept
-    if (pbuf->curr.target_compid > 0
-        && has_sys_comp_id(pbuf->curr.target_sysid, pbuf->curr.target_compid)) {
-        return Endpoint::AcceptState::Accepted;
-    }
-
-    // This endpoint has the target of message (sysid, but compid is broadcast or non-existent):
-    // accept
-    if ((pbuf->curr.target_compid == 0 || pbuf->curr.target_compid == -1)
-        && has_sys_id(pbuf->curr.target_sysid)) {
-        return Endpoint::AcceptState::Accepted;
-    }
-    // This endpoint has the sniffer_sysid: accept
-    if ((sniffer_sysid != 0) && has_sys_id(sniffer_sysid)) {
-        return Endpoint::AcceptState::Accepted;
-    }
-
-    // Reject everything else
-    return Endpoint::AcceptState::Rejected;
+    return Endpoint::AcceptState::Accepted;
 }
 
 bool Endpoint::is_throttling_enabled(const struct buffer *pbuf) const
