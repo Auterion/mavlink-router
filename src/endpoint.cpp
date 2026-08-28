@@ -152,6 +152,12 @@ static bool ipv6_is_multicast(const char *ip)
     return strncmp(ip, "ff0", 3) == 0;
 }
 
+static bool ipv4_is_multicast(in_addr_t addr)
+{
+    /* multicast addresses are in range 224.0.0.0 - 239.255.255.255 (0xE0000000 - 0xEFFFFFFF) */
+    return (ntohl(addr) & 0xF0000000) == 0xE0000000;
+}
+
 static bool validate_ipv6(const std::string &ip)
 {
     // simplyfied pattern
@@ -1526,11 +1532,44 @@ int UdpEndpoint::open_ipv4(const char *ip, unsigned long port, UdpEndpointConfig
     sockaddr.sin_addr.s_addr = inet_addr(ip);
     sockaddr.sin_port = htons(port);
 
+    const bool is_multicast = ipv4_is_multicast(sockaddr.sin_addr.s_addr);
+    in_addr_t multicast_addr = 0;
+
     if (mode == UdpEndpointConfig::Mode::Server || mode == UdpEndpointConfig::Mode::Receiver) {
+        if (is_multicast) {
+            // Save multicast address before modifying sockaddr for bind
+            multicast_addr = sockaddr.sin_addr.s_addr;
+
+            // Enable address reuse for multicast (allows multiple subscribers)
+            const int reuse_val = 1;
+            if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse_val, sizeof(reuse_val)) < 0) {
+                log_error("Error setting SO_REUSEADDR for %s:%lu (%m)", ip, port);
+                goto fail;
+            }
+
+            // Multicast requires binding to INADDR_ANY
+            sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        }
+
         if (bind(fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
             log_error("Error binding IPv4 socket for %s:%lu (%m)", ip, port);
             goto fail;
         }
+
+        if (is_multicast) {
+            // Join the multicast group
+            struct ip_mreq mreq = {};
+            mreq.imr_multiaddr.s_addr = multicast_addr;
+            mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+
+            if (setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+                log_error("Error joining multicast group %s (%m)", ip);
+                goto fail;
+            }
+
+            log_info("Joined multicast group %s", ip);
+        }
+
         sockaddr.sin_port = 0;
     }
 
