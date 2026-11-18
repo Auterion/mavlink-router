@@ -81,6 +81,33 @@
           }
         }
       ]
+    },
+
+    {
+      "name": "get_own_sysid",
+      "summary": "Return the MAVLink system ID of the own vehicle",
+      "description": "mavlink-router determines the own system ID from the first autopilot (component ID 1, MAV_COMP_ID_AUTOPILOT1) it sees, on the endpoint set with `AutopilotEndpoint` in the `General` section of the configuration or on any endpoint if that is not set. Once determined, it doesn't change. Returns null while no autopilot has been seen yet, so clients can retry.",
+      "params": [],
+      "result": {
+        "name": "sysid",
+        "description": "System ID of the own autopilot, or null if not determined yet",
+        "schema": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 255 },
+            { "type": "null" }
+          ]
+        }
+      },
+      "examples": [
+        {
+          "name": "get_own_sysid",
+          "params": [],
+          "result": {
+            "name": "sysid",
+            "value": 1
+          }
+        }
+      ]
     }
   ],
 

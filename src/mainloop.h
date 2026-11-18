@@ -40,7 +40,8 @@ struct Configuration {
     Log::Backend log_backend{Log::Backend::STDERR}; ///< CLI "syslog"
     unsigned long dedup_period_ms;                  ///< conf "DeduplicationPeriod"
     std::string command_pipe_path{""};
-    std::string api_socket_path{""}; ///< conf "APISocketPath"
+    std::string api_socket_path{""};    ///< conf "APISocketPath"
+    std::string autopilot_endpoint{""}; ///< conf "AutopilotEndpoint"
 
     LogOptions log_config; ///< logging is in General config section, but internally an endpoint
     std::vector<UartEndpointConfig> uart_configs;
@@ -74,6 +75,18 @@ public:
     void clear_endpoints();
 
     const std::vector<std::shared_ptr<Endpoint>> &get_endpoints() const { return g_endpoints; };
+
+    /*
+     * System ID of the own vehicle: the first autopilot (MAV_COMP_ID_AUTOPILOT1) seen on the
+     * endpoint configured with "AutopilotEndpoint", or on any endpoint if that's not set.
+     * -1 until such an autopilot has been seen.
+     */
+    int get_own_sysid() const { return _own_sysid; }
+
+    /*
+     * Called by endpoints when they see a component for the first time
+     */
+    void handle_new_component(const Endpoint &endpoint, uint8_t sysid, uint8_t compid);
 
     /*
      * Returns true, if the message was already received earlier
@@ -128,6 +141,9 @@ private:
     Dedup _msg_dedup{0}; // disabled by default
 
     std::shared_ptr<ApiServer> _api_server = nullptr;
+
+    std::string _autopilot_endpoint = "";
+    int _own_sysid = -1;
 
     struct {
         uint32_t msg_to_unknown = 0;

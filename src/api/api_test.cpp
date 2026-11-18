@@ -277,3 +277,74 @@ TEST(ApiTest, byzantine_no_readback)
     EXPECT_FALSE(api_client.is_valid());
     Mainloop::teardown();
 }
+
+class StubEndpoint : public Endpoint {
+public:
+    StubEndpoint(const std::string &name)
+        : Endpoint{"Stub", name}
+    {
+    }
+    int write_msg(const struct buffer * /* pbuf */) override { return 0; }
+    int flush_pending_msgs() override { return -ENOSYS; }
+    ssize_t _read_msg(uint8_t * /* buf */, size_t /* len */) override { return 0; }
+};
+
+static json call_get_own_sysid(ApiServer &api_server)
+{
+    json request = {{"jsonrpc", "2.0"}, {"method", "get_own_sysid"}, {"id", 1}};
+
+    json response = json::parse(api_server.handle_request(request.dump() + "\n"), nullptr, false);
+    EXPECT_FALSE(response.is_discarded());
+    EXPECT_EQ(response["jsonrpc"], "2.0");
+    EXPECT_EQ(response["id"], 1);
+    EXPECT_TRUE(response.contains("result"));
+    return response["result"];
+}
+
+TEST(ApiTest, get_own_sysid_any_endpoint)
+{
+    Mainloop &mainloop = Mainloop::init();
+    ApiServer api_server("/tmp/mavlink-router.sock");
+    StubEndpoint fmu("FMU");
+    StubEndpoint radio("RADIO");
+
+    // Undetermined until an autopilot is seen
+    EXPECT_TRUE(call_get_own_sysid(api_server).is_null());
+
+    // Components other than the autopilot are ignored
+    mainloop.handle_new_component(radio, 255, 190);
+    EXPECT_TRUE(call_get_own_sysid(api_server).is_null());
+
+    // The first autopilot seen is the own vehicle
+    mainloop.handle_new_component(fmu, 3, 1);
+    EXPECT_EQ(call_get_own_sysid(api_server), 3);
+
+    // Autopilots seen later don't change it
+    mainloop.handle_new_component(radio, 7, 1);
+    EXPECT_EQ(call_get_own_sysid(api_server), 3);
+
+    Mainloop::teardown();
+}
+
+TEST(ApiTest, get_own_sysid_configured_endpoint)
+{
+    Mainloop &mainloop = Mainloop::init();
+    Configuration config{};
+    config.tcp_port = 0;
+    config.autopilot_endpoint = "FMU";
+    mainloop.add_endpoints(config);
+
+    ApiServer api_server("/tmp/mavlink-router.sock");
+    StubEndpoint fmu("FMU");
+    StubEndpoint radio("RADIO");
+
+    // Autopilots on other endpoints are ignored, even if seen first
+    mainloop.handle_new_component(radio, 7, 1);
+    EXPECT_TRUE(call_get_own_sysid(api_server).is_null());
+
+    mainloop.handle_new_component(fmu, 3, 1);
+    EXPECT_EQ(call_get_own_sysid(api_server), 3);
+
+    mainloop.clear_endpoints();
+    Mainloop::teardown();
+}

@@ -56,6 +56,18 @@ json get_endpoints(const json &params)
     return endpoints;
 }
 
+/**
+ * Get the system ID of the own vehicle, as determined by mavlink-router from the first autopilot
+ * (MAV_COMP_ID_AUTOPILOT1) seen on the configured "AutopilotEndpoint" (or on any endpoint).
+ *
+ * @return the system ID, or null if it is not determined yet.
+ */
+json get_own_sysid(const json & /* params */)
+{
+    const auto sysid = Mainloop::get_instance().get_own_sysid();
+    return sysid >= 0 ? json(sysid) : json(nullptr);
+}
+
 json get_version(const json & /* params */)
 {
     return json(GIT_VERSION);
@@ -68,6 +80,7 @@ namespace api {
 
 const ApiMethod methods[] = {
     {"get_endpoints",       get_endpoints},
+    {"get_own_sysid",       get_own_sysid},
     {"get_version",         get_version},
     {}
 };

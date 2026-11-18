@@ -443,6 +443,7 @@ static int parse_confs(ConfFile &conffile, Configuration &config)
         {"SnifferSysid",        false, ConfFile::parse_ul,          OPTIONS_TABLE_STRUCT_FIELD(Configuration, sniffer_sysid)},
         {"CommandPipePath",     false, ConfFile::parse_stdstring,   OPTIONS_TABLE_STRUCT_FIELD(Configuration, command_pipe_path)},
         {"APISocketPath",       false, ConfFile::parse_stdstring,   OPTIONS_TABLE_STRUCT_FIELD(Configuration, api_socket_path)},
+        {"AutopilotEndpoint",   false, ConfFile::parse_stdstring,   OPTIONS_TABLE_STRUCT_FIELD(Configuration, autopilot_endpoint)},
         {}
     };
     // clang-format on

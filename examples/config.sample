@@ -52,6 +52,12 @@
 # Default: "" (API server disabled)
 #APISocketPath = /tmp/mavlink-router.sock
 
+# Name of the endpoint the own autopilot (flight controller) is connected to.
+# The system ID of the first autopilot (component ID 1) seen on this endpoint is
+# taken as the system ID of the own vehicle (see "get_own_sysid" in the API).
+# Default: "" (first autopilot seen on any endpoint)
+#AutopilotEndpoint = FlightController
+
 ## TCP Server Endpoints
 
 # Listen for TCP connections on this port. Set to 0 to disable.
