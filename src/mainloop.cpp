@@ -65,6 +65,8 @@ Mainloop &Mainloop::init()
     assert(_initialized == false);
 
     _initialized = true;
+    _instance._autopilot_endpoint.clear();
+    _instance._own_sysid = -1;
 
     return _instance;
 }
@@ -541,6 +543,12 @@ int Mainloop::loop()
                 continue;
             }
 
+            if (_api_server != nullptr && events[i].data.ptr == &(_api_server->fd)) {
+                // New client wants to connect to the API server
+                _api_server->accept_client();
+                continue;
+            }
+
             auto *p = static_cast<Pollable *>(events[i].data.ptr);
 
             if (events[i].events & EPOLLIN) {
@@ -579,6 +587,9 @@ int Mainloop::loop()
 
         if (should_process_tcp_hangups) {
             process_tcp_hangups();
+        }
+        if (_api_server != nullptr) {
+            _api_server->process_client_hangups();
         }
 
         _del_timeouts();
@@ -640,8 +651,34 @@ bool Mainloop::dedup_check_msg(const buffer *buf)
         == Dedup::PacketStatus::NEW_PACKET_OR_TIMED_OUT;
 }
 
+void Mainloop::handle_new_component(const Endpoint &endpoint, uint8_t sysid, uint8_t compid)
+{
+    if (compid != MAV_COMP_ID_AUTOPILOT1) {
+        return;
+    }
+    if (!_autopilot_endpoint.empty() && endpoint.get_name() != _autopilot_endpoint) {
+        return;
+    }
+
+    if (_own_sysid < 0) {
+        _own_sysid = sysid;
+        log_info("Own system ID is %u (autopilot seen on endpoint '%s')",
+                 sysid,
+                 endpoint.get_name().c_str());
+    } else if (_own_sysid != sysid) {
+        log_warning("Ignoring autopilot with system ID %u on endpoint '%s', own system ID is "
+                    "already %d%s",
+                    sysid,
+                    endpoint.get_name().c_str(),
+                    _own_sysid,
+                    _autopilot_endpoint.empty() ? " (set AutopilotEndpoint to select it)" : "");
+    }
+}
+
 bool Mainloop::add_endpoints(const Configuration &config)
 {
+    _autopilot_endpoint = config.autopilot_endpoint;
+
     // Create UART and UDP endpoints
     if (config.sniffer_sysid != 0) {
         Endpoint::sniffer_sysid = config.sniffer_sysid;
@@ -707,6 +744,17 @@ bool Mainloop::add_endpoints(const Configuration &config)
         g_commands_fd = open_command_pipe(command_pipe_path);
     }
 
+    // Create API server
+    if (!config.api_socket_path.empty()) {
+        api_socket_path = config.api_socket_path;
+        _api_server = std::make_shared<ApiServer>(api_socket_path);
+        if (!_api_server->setup()) {
+            _api_server = nullptr;
+        } else {
+            this->add_fd(_api_server->fd, &(_api_server->fd), EPOLLIN);
+        }
+    }
+
     // Create Log endpoint
     auto conf = config.log_config;
     if (!conf.logs_dir.empty()) {
@@ -743,6 +791,15 @@ bool Mainloop::add_endpoints(const Configuration &config)
     if (config.dedup_period_ms > 0) {
         log_info("Message de-duplication enabled: %ld ms period", config.dedup_period_ms);
         _msg_dedup.set_dedup_period(config.dedup_period_ms);
+    }
+
+    if (!_autopilot_endpoint.empty()
+        && std::none_of(g_endpoints.begin(), g_endpoints.end(), [this](const auto &e) {
+               return e->get_name() == _autopilot_endpoint;
+           })) {
+        log_warning("AutopilotEndpoint '%s' does not match any endpoint, own system ID will "
+                    "stay undetermined",
+                    _autopilot_endpoint.c_str());
     }
 
     return true;

@@ -497,6 +497,8 @@ void Endpoint::_add_sys_comp_id(uint8_t sysid, uint8_t compid)
     }
     _sys_comp_ids.push_back(sys_comp_id);
 
+    Mainloop::get_instance().handle_new_component(*this, sysid, compid);
+
     // add to grouped endpoints as well
     for (auto e : _group_members) {
         e->_add_sys_comp_id(sysid, compid);
@@ -937,6 +939,17 @@ uint8_t Endpoint::get_trimmed_zeros(const mavlink_msg_entry_t *msg_entry,
     }
 
     return msg_entry->max_msg_len - msg->payload_len;
+}
+
+std::vector<std::pair<uint8_t, uint8_t>> Endpoint::get_known_mav_components() const
+{
+    std::vector<std::pair<uint8_t, uint8_t>> components;
+
+    for (const auto &id : _sys_comp_ids) {
+        components.emplace_back(id >> 8, id & 0xff);
+    }
+
+    return components;
 }
 
 void Endpoint::log_aggregate(unsigned int interval_sec)
