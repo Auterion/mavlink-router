@@ -786,6 +786,49 @@ TEST(UdpEndpointTest, ConfigValidateMode)
     EXPECT_FALSE(UdpEndpoint::validate_config(config)) << "with Undefined mode";
 }
 
+TEST(UdpEndpointTest, ConfigValidateMulticastAddress)
+{
+    UdpEndpointConfig config;
+    config.port = 14550;
+    config.mode = UdpEndpointConfig::Mode::Server;
+
+    // valid multicast addresses (224.0.0.0 - 239.255.255.255)
+    config.address = "224.0.0.1";
+    EXPECT_TRUE(UdpEndpoint::validate_config(config))
+        << "with multicast address " << config.address;
+
+    config.address = "239.255.255.250";
+    EXPECT_TRUE(UdpEndpoint::validate_config(config))
+        << "with multicast address " << config.address;
+
+    config.address = "239.255.145.50";
+    EXPECT_TRUE(UdpEndpoint::validate_config(config))
+        << "with multicast address " << config.address;
+
+    // valid unicast addresses (for comparison)
+    config.address = "192.168.1.1";
+    EXPECT_TRUE(UdpEndpoint::validate_config(config)) << "with unicast address " << config.address;
+
+    config.address = "0.0.0.0";
+    EXPECT_TRUE(UdpEndpoint::validate_config(config)) << "with bind-all address " << config.address;
+}
+
+TEST(UdpEndpointTest, MulticastServerSetup)
+{
+    // Mainloop is already initialized by UdpEndpointTest.Init
+    UdpEndpoint udp{"multicast_test"};
+
+    UdpEndpointConfig config;
+    config.name = "multicast_test";
+    config.address = "239.255.145.50";
+    config.port = 14550;
+    config.mode = UdpEndpointConfig::Mode::Server;
+
+    // Setup should succeed - joins multicast group
+    EXPECT_TRUE(udp.setup(config)) << "Failed to setup multicast UDP endpoint";
+    EXPECT_TRUE(udp.is_valid()) << "Multicast endpoint should be valid after setup";
+}
+
 /**
  * TCP Endpoint
  */
